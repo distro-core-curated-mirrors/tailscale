@@ -6,6 +6,7 @@ package e2e
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -43,6 +44,10 @@ func TestMain(m *testing.M) {
 
 func runTests(m *testing.M) (int, error) {
 	secret := os.Getenv("TS_API_CLIENT_SECRET")
+	loginServer := os.Getenv("TS_LOGIN_SERVER")
+	if loginServer == "" {
+		loginServer = "https://login.tailscale.com"
+	}
 	if secret != "" {
 		secretParts := strings.Split(secret, "-")
 		if len(secretParts) != 4 {
@@ -52,11 +57,12 @@ func runTests(m *testing.M) (int, error) {
 		credentials := clientcredentials.Config{
 			ClientID:     secretParts[2],
 			ClientSecret: secret,
-			TokenURL:     "https://login.tailscale.com/api/v2/oauth/token",
+			TokenURL:     fmt.Sprintf("%s/api/v2/oauth/token", loginServer),
 			Scopes:       []string{"auth_keys"},
 		}
 		apiClient = tailscale.NewClient("-", nil)
 		apiClient.HTTPClient = credentials.Client(ctx)
+		apiClient.BaseURL = loginServer
 
 		caps := tailscale.KeyCapabilities{
 			Devices: tailscale.KeyDeviceCapabilities{
@@ -76,10 +82,11 @@ func runTests(m *testing.M) (int, error) {
 		defer apiClient.DeleteKey(context.Background(), authKeyMeta.ID)
 
 		tailnetClient = &tsnet.Server{
-			Hostname:  "test-proxy",
-			Ephemeral: true,
-			Store:     &mem.Store{},
-			AuthKey:   authKey,
+			ControlURL: loginServer,
+			Hostname:   "test-proxy",
+			Ephemeral:  true,
+			Store:      &mem.Store{},
+			AuthKey:    authKey,
 		}
 		_, err = tailnetClient.Up(ctx)
 		if err != nil {

@@ -73,8 +73,7 @@ func TestIngress(t *testing.T) {
 			Name:      "test-ingress",
 			Namespace: "default",
 			Annotations: map[string]string{
-				"tailscale.com/expose":      "true",
-				"tailscale.com/proxy-class": "prod",
+				"tailscale.com/expose": "true",
 			},
 		},
 		Spec: corev1.ServiceSpec{
