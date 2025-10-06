@@ -273,29 +273,27 @@ func main() {
 		}
 	}
 
-	if !args.encryptState.set {
-		args.encryptState.v = defaultEncryptState()
+	defaultEnc := defaultEncryptState()
+	var conflict string
+	if args.encryptState.v || defaultEnc {
+		switch {
+		case runtime.GOOS != "linux" && runtime.GOOS != "windows":
+			conflict = fmt.Sprintf("--encrypt-state is not supported on %s", runtime.GOOS)
+		case !store.HasKnownProviderPrefix(store.TPMPrefix + "/"): // Check if we have TPM support in this build.
+			conflict = "--encrypt-state is not supported in this build of tailscaled"
+		case !hostinfo.New().TPM.Present(): // Check if we have TPM access.
+			conflict = "--encrypt-state is not supported on this device or a TPM is not accessible"
+		case args.statepath != "" && store.HasKnownProviderPrefix(args.statepath): // Check for conflicting prefix in --state, like arn: or kube:.
+			conflict = "--encrypt-state can only be used with --state set to a local file path"
+		}
 	}
-	if args.encryptState.v {
-		if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
-			log.SetFlags(0)
-			log.Fatalf("--encrypt-state is not supported on %s", runtime.GOOS)
-		}
-		// Check if we have TPM support in this build.
-		if !store.HasKnownProviderPrefix(store.TPMPrefix + "/") {
-			log.SetFlags(0)
-			log.Fatal("--encrypt-state is not supported in this build of tailscaled")
-		}
-		// Check if we have TPM access.
-		if !hostinfo.New().TPM.Present() {
-			log.SetFlags(0)
-			log.Fatal("--encrypt-state is not supported on this device or a TPM is not accessible")
-		}
-		// Check for conflicting prefix in --state, like arn: or kube:.
-		if args.statepath != "" && store.HasKnownProviderPrefix(args.statepath) {
-			log.SetFlags(0)
-			log.Fatal("--encrypt-state can only be used with --state set to a local file path")
-		}
+	if args.encryptState.v && conflict != "" {
+		log.SetFlags(0)
+		log.Fatal(conflict)
+	}
+	// Only allow default enabled to take effect if there's no conflict.
+	if !args.encryptState.set && defaultEnc && conflict == "" {
+		args.encryptState.v = true
 	}
 
 	if args.disableLogs {
