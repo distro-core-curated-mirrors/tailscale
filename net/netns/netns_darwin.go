@@ -8,10 +8,10 @@ package netns
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/netip"
 	"os"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -19,7 +19,6 @@ import (
 	"golang.org/x/sys/unix"
 	"tailscale.com/envknob"
 	"tailscale.com/net/netmon"
-	"tailscale.com/net/tsaddr"
 	"tailscale.com/types/logger"
 )
 
@@ -36,25 +35,122 @@ var errInterfaceStateInvalid = errors.New("interface state invalid")
 // controlLogf binds c to a particular interface as necessary to dial the
 // provided (network, address).
 func controlLogf(logf logger.Logf, netMon *netmon.Monitor, network, address string, c syscall.RawConn) error {
-	if isLocalhost(address) {
-		// Don't bind to an interface for localhost connections.
+	if disableBindConnToInterface.Load() || isLocalhost(address) {
 		return nil
 	}
 
-	if disableBindConnToInterface.Load() {
-		logf("netns_darwin: binding connection to interfaces disabled")
-		return nil
-	}
+	// (barstar) TODO: proprer node-cap or env knob for this
 
-	idx, err := getInterfaceIndex(logf, netMon, address)
-	if err != nil {
-		// callee logged
-		return nil
-	}
+	// if !probeInterfaces.Load() {
+	// 	idx, _ := getInterfaceIndex(logf, netMon, address)
+	// 	return bindConnToInterface(c, network, address, idx, logf)
+	// }
 
-	return bindConnToInterface(c, network, address, idx, logf)
+	/*
+
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return fmt.Errorf("netns: control: SplitHostPort %q: %w", address, err)
+		}
+
+		opts := probeOpts{
+			logf:    logf,
+			network: network,
+			host:    host,
+			port:    port,
+			filterf: filterInvalidIntefaces,
+			sortf:   sortInterfacesByPriority,
+		}
+
+		// No netmon and no routing table.
+		iface, err := findInterfaceThatCanReach(opts)
+
+		if err != nil || iface == nil {
+			return err
+		}
+	*/
+	bindFn := getBindFn(network, address)
+	return bindFn(c, 0)
 }
 
+func filterInvalidIntefaces(iface net.Interface) bool {
+	uninterestingPrefixes := []string{"awdl", "llw", "gif", "stf", "ipsec", "bond", "fwip", "utun"}
+
+	for _, prefix := range uninterestingPrefixes {
+		if strings.HasPrefix(iface.Name, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
+func sortInterfacesByPriority(interfaces []inetReachability) []inetReachability {
+	if len(interfaces) <= 1 {
+		return interfaces
+	}
+	p := map[string]int{
+		"en":  10, // Ethernet or Wifi
+		"pdp": 20, // Cellular
+	}
+	priority := func(name string) int {
+		if val, ok := p[name]; ok {
+			return val
+		}
+		return 0
+	}
+	sort.SliceStable(interfaces, func(i, j int) bool {
+		pi, pj := priority(interfaces[i].iface.Name), priority(interfaces[j].iface.Name)
+		if pi != pj {
+			return pi < pj
+		}
+		return interfaces[i].iface.Name < interfaces[j].iface.Name
+	})
+	return interfaces
+}
+
+// SetListenConfigInterfaceIndex sets lc.Control such that sockets are bound
+// to the provided interface index.
+func SetListenConfigInterfaceIndex(lc *net.ListenConfig, ifIndex int) error {
+	if lc == nil {
+		return errors.New("nil ListenConfig")
+	}
+	if lc.Control != nil {
+		return errors.New("ListenConfig.Control already set")
+	}
+	lc.Control = func(network, address string, c syscall.RawConn) error {
+		bindFn := getBindFn(network, address)
+		return bindFn(c, uint32(ifIndex))
+	}
+	return nil
+}
+
+func bindSocket6(c syscall.RawConn, idx uint32) error {
+	var sockErr error
+	err := c.Control(func(fd uintptr) {
+		sockErr = unix.SetsockoptInt(int(fd), unix.IPPROTO_IPV6, unix.IPV6_BOUND_IF, int(idx))
+	})
+	if err != nil {
+		return fmt.Errorf("RawConn.Control on %T: %w", c, err)
+	}
+	return sockErr
+}
+
+func bindSocket4(c syscall.RawConn, idx uint32) error {
+	var sockErr error
+	err := c.Control(func(fd uintptr) {
+		sockErr = unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_BOUND_IF, int(idx))
+	})
+	if err != nil {
+		return fmt.Errorf("RawConn.Control on %T: %w", c, err)
+	}
+	return sockErr
+}
+
+// Legacy
+
+// getInterfaceIndex returns the interface index that we should bind to
+// in order to send traffic to the provided address using netmon's view of
+// the DefaultRouteInterfaceIndex and/or a direct query to the routing table.
 func getInterfaceIndex(logf logger.Logf, netMon *netmon.Monitor, address string) (int, error) {
 	// Helper so we can log errors.
 	defaultIdx := func() (int, error) {
@@ -116,14 +212,9 @@ func getInterfaceIndex(logf logger.Logf, netMon *netmon.Monitor, address string)
 	}
 
 	// If the address doesn't parse, use the default index.
-	addr, err := parseAddress(address)
-	if err != nil {
-		if err != errUnspecifiedHost {
-			logf("[unexpected] netns: error parsing address %q: %v", address, err)
-		}
-		return defaultIdx()
-	}
 
+	logf("netns: getting interface index for address %q", address)
+	addr, err := parseAddress(address)
 	idx, err := interfaceIndexFor(addr, true /* canRecurse */)
 	if err != nil {
 		logf("netns: error getting interface index for %q: %v", address, err)
@@ -142,34 +233,6 @@ func getInterfaceIndex(logf logger.Logf, netMon *netmon.Monitor, address string)
 	logf("netns: completed success interfaceIndexFor(%s) = %d", address, idx)
 
 	return idx, err
-}
-
-// tailscaleInterface returns the current machine's Tailscale interface, if any.
-// If none is found, (nil, nil) is returned.
-// A non-nil error is only returned on a problem listing the system interfaces.
-func tailscaleInterface() (*net.Interface, error) {
-	ifs, err := net.Interfaces()
-	if err != nil {
-		return nil, err
-	}
-	for _, iface := range ifs {
-		if !strings.HasPrefix(iface.Name, "utun") {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, a := range addrs {
-			if ipnet, ok := a.(*net.IPNet); ok {
-				nip, ok := netip.AddrFromSlice(ipnet.IP)
-				if ok && tsaddr.IsTailscaleIP(nip.Unmap()) {
-					return &iface, nil
-				}
-			}
-		}
-	}
-	return nil, nil
 }
 
 // interfaceIndexFor returns the interface index that we should bind to in
@@ -276,41 +339,4 @@ func interfaceIndexFor(addr netip.Addr, canRecurse bool) (int, error) {
 	}
 
 	return 0, fmt.Errorf("no valid address found")
-}
-
-// SetListenConfigInterfaceIndex sets lc.Control such that sockets are bound
-// to the provided interface index.
-func SetListenConfigInterfaceIndex(lc *net.ListenConfig, ifIndex int) error {
-	if lc == nil {
-		return errors.New("nil ListenConfig")
-	}
-	if lc.Control != nil {
-		return errors.New("ListenConfig.Control already set")
-	}
-	lc.Control = func(network, address string, c syscall.RawConn) error {
-		return bindConnToInterface(c, network, address, ifIndex, log.Printf)
-	}
-	return nil
-}
-
-func bindConnToInterface(c syscall.RawConn, network, address string, ifIndex int, logf logger.Logf) error {
-	v6 := strings.Contains(address, "]:") || strings.HasSuffix(network, "6") // hacky test for v6
-	proto := unix.IPPROTO_IP
-	opt := unix.IP_BOUND_IF
-	if v6 {
-		proto = unix.IPPROTO_IPV6
-		opt = unix.IPV6_BOUND_IF
-	}
-
-	var sockErr error
-	err := c.Control(func(fd uintptr) {
-		sockErr = unix.SetsockoptInt(int(fd), proto, opt, ifIndex)
-	})
-	if sockErr != nil {
-		logf("[unexpected] netns: bindConnToInterface(%q, %q), v6=%v, index=%v: %v", network, address, v6, ifIndex, sockErr)
-	}
-	if err != nil {
-		return fmt.Errorf("RawConn.Control on %T: %w", c, err)
-	}
-	return sockErr
 }
