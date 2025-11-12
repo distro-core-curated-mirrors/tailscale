@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	tsapi "tailscale.com/k8s-operator/apis/v1alpha1"
 	"tailscale.com/types/ptr"
 )
@@ -23,6 +24,7 @@ func TestRecorderSpecs(t *testing.T) {
 				Name: "test",
 			},
 			Spec: tsapi.RecorderSpec{
+				Replicas: ptr.To[int32](3),
 				StatefulSet: tsapi.RecorderStatefulSet{
 					Labels: map[string]string{
 						"ss-label-key": "ss-label-value",
@@ -101,10 +103,10 @@ func TestRecorderSpecs(t *testing.T) {
 		}
 
 		// Pod-level.
-		if diff := cmp.Diff(ss.Labels, labels("recorder", "test", tsr.Spec.StatefulSet.Labels)); diff != "" {
+		if diff := cmp.Diff(ss.Labels, tsrLabels("recorder", "test", tsr.Spec.StatefulSet.Labels)); diff != "" {
 			t.Errorf("(-got +want):\n%s", diff)
 		}
-		if diff := cmp.Diff(ss.Spec.Template.Labels, labels("recorder", "test", tsr.Spec.StatefulSet.Pod.Labels)); diff != "" {
+		if diff := cmp.Diff(ss.Spec.Template.Labels, tsrLabels("recorder", "test", tsr.Spec.StatefulSet.Pod.Labels)); diff != "" {
 			t.Errorf("(-got +want):\n%s", diff)
 		}
 		if diff := cmp.Diff(ss.Spec.Template.Spec.Affinity, tsr.Spec.StatefulSet.Pod.Affinity); diff != "" {
@@ -124,7 +126,7 @@ func TestRecorderSpecs(t *testing.T) {
 		}
 
 		// Container-level.
-		if diff := cmp.Diff(ss.Spec.Template.Spec.Containers[0].Env, env(tsr, tsLoginServer)); diff != "" {
+		if diff := cmp.Diff(ss.Spec.Template.Spec.Containers[0].Env, tsrEnv(tsr, tsLoginServer)); diff != "" {
 			t.Errorf("(-got +want):\n%s", diff)
 		}
 		if diff := cmp.Diff(ss.Spec.Template.Spec.Containers[0].Image, tsr.Spec.StatefulSet.Pod.Container.Image); diff != "" {

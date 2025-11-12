@@ -74,6 +74,12 @@ type RecorderSpec struct {
 	// lifetime of a specific pod.
 	// +optional
 	Storage Storage `json:"storage,omitempty"`
+
+	// Replicas specifies how many instances of tsrecorder to run.
+	// https://tailscale.com/kb/1115/high-availability. Defaults to 1.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	Replicas *int32 `json:"replicas,omitempty"`
 }
 
 type RecorderStatefulSet struct {

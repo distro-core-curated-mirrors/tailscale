@@ -4,3 +4,4 @@ metadata:
   name: recorder
 spec:
   enableUI: true
+  replicas: 2

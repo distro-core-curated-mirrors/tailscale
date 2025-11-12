@@ -20,9 +20,11 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 	tsoperator "tailscale.com/k8s-operator"
 	tsapi "tailscale.com/k8s-operator/apis/v1alpha1"
 	"tailscale.com/tstest"
+	"tailscale.com/types/ptr"
 )
 
 const (
@@ -35,6 +37,9 @@ func TestRecorder(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "test",
 			Finalizers: []string{"tailscale.com/finalizer"},
+		},
+		Spec: tsapi.RecorderSpec{
+			Replicas: ptr.To[int32](3),
 		},
 	}
 
@@ -233,26 +238,38 @@ func TestRecorder(t *testing.T) {
 func expectRecorderResources(t *testing.T, fc client.WithWatch, tsr *tsapi.Recorder, shouldExist bool) {
 	t.Helper()
 
-	auth := tsrAuthSecret(tsr, tsNamespace, "secret-authkey")
-	state := tsrStateSecret(tsr, tsNamespace)
+	var replicas int32 = 1
+	if tsr.Spec.Replicas != nil {
+		replicas = *tsr.Spec.Replicas
+	}
+
 	role := tsrRole(tsr, tsNamespace)
 	roleBinding := tsrRoleBinding(tsr, tsNamespace)
 	serviceAccount := tsrServiceAccount(tsr, tsNamespace)
 	statefulSet := tsrStatefulSet(tsr, tsNamespace, tsLoginServer)
 
 	if shouldExist {
-		expectEqual(t, fc, auth)
-		expectEqual(t, fc, state)
 		expectEqual(t, fc, role)
 		expectEqual(t, fc, roleBinding)
 		expectEqual(t, fc, serviceAccount)
 		expectEqual(t, fc, statefulSet, removeResourceReqs)
 	} else {
-		expectMissing[corev1.Secret](t, fc, auth.Namespace, auth.Name)
-		expectMissing[corev1.Secret](t, fc, state.Namespace, state.Name)
 		expectMissing[rbacv1.Role](t, fc, role.Namespace, role.Name)
 		expectMissing[rbacv1.RoleBinding](t, fc, roleBinding.Namespace, roleBinding.Name)
 		expectMissing[corev1.ServiceAccount](t, fc, serviceAccount.Namespace, serviceAccount.Name)
 		expectMissing[appsv1.StatefulSet](t, fc, statefulSet.Namespace, statefulSet.Name)
+	}
+
+	for replica := range replicas {
+		auth := tsrAuthSecret(tsr, tsNamespace, "secret-authkey", replica)
+		state := tsrStateSecret(tsr, tsNamespace, replica)
+
+		if shouldExist {
+			expectEqual(t, fc, auth)
+			expectEqual(t, fc, state)
+		} else {
+			expectMissing[corev1.Secret](t, fc, auth.Namespace, auth.Name)
+			expectMissing[corev1.Secret](t, fc, state.Namespace, state.Name)
+		}
 	}
 }
