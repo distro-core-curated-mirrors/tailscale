@@ -2518,7 +2518,7 @@ func (b *LocalBackend) startLocked(opts ipn.Options) error {
 	if inServerMode := prefs.ForceDaemon(); inServerMode || runtime.GOOS == "windows" {
 		logf("serverMode=%v", inServerMode)
 	}
-	b.applyPrefsToHostinfoLocked(hostinfo, prefs)
+	b.applyPrefsToHostinfoLocked(b.hostinfo, prefs)
 
 	persistv := prefs.Persist().AsStruct()
 	if persistv == nil {
@@ -2555,7 +2555,7 @@ func (b *LocalBackend) startLocked(opts ipn.Options) error {
 		Persist:              *persistv,
 		ServerURL:            serverURL,
 		AuthKey:              opts.AuthKey,
-		Hostinfo:             hostinfo,
+		Hostinfo:             b.makeHostInfoLocked(),
 		HTTPTestClient:       httpTestClient,
 		DiscoPublicKey:       discoPublic,
 		DebugFlags:           debugFlags,
@@ -4847,6 +4847,13 @@ func (b *LocalBackend) doSetHostinfoFilterServicesLocked() {
 		b.logf("[unexpected] doSetHostinfoFilterServices with nil hostinfo")
 		return
 	}
+
+	hi := b.makeHostInfoLocked()
+
+	cc.SetHostinfo(hi)
+}
+
+func (b *LocalBackend) makeHostInfoLocked() *tailcfg.Hostinfo {
 	peerAPIServices := b.peerAPIServicesLocked()
 	if b.egg {
 		peerAPIServices = append(peerAPIServices, tailcfg.Service{Proto: "egg", Port: 1})
@@ -4874,7 +4881,7 @@ func (b *LocalBackend) doSetHostinfoFilterServicesLocked() {
 		b.logf("Hostinfo peerAPI ports changed: expected %v, got %v", expectedPorts, actualPorts)
 	}
 
-	cc.SetHostinfo(&hi)
+	return &hi
 }
 
 type portPair struct {
@@ -5268,6 +5275,9 @@ func (b *LocalBackend) initPeerAPIListenerLocked() {
 		if allSame {
 			// Nothing to do.
 			b.logf("[v1] initPeerAPIListener: %d netmap addresses match existing listeners", addrs.Len())
+			// TODO(zofrex): maybe fragile? This doesn't check what's actually in
+			// hostinfo, and if peerAPIListeners gets out of sync with hostinfo.Services,
+			// we won't get back into a good state.
 			return
 		}
 	}
