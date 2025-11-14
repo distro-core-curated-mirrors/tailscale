@@ -1956,18 +1956,19 @@ func TestSetServe(t *testing.T) {
 	e := &serveEnv{}
 	magicDNSSuffix := "test.ts.net"
 	tests := []struct {
-		name        string
-		desc        string
-		cfg         *ipn.ServeConfig
-		st          *ipnstate.Status
-		dnsName     string
-		srvType     serveType
-		srvPort     uint16
-		mountPath   string
-		target      string
-		allowFunnel bool
-		expected    *ipn.ServeConfig
-		expectErr   bool
+		name          string
+		desc          string
+		cfg           *ipn.ServeConfig
+		st            *ipnstate.Status
+		dnsName       string
+		srvType       serveType
+		srvPort       uint16
+		mountPath     string
+		target        string
+		allowFunnel   bool
+		proxyProtocol int
+		expected      *ipn.ServeConfig
+		expectErr     bool
 	}{
 		{
 			name:      "add new handler",
@@ -2250,7 +2251,7 @@ func TestSetServe(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := e.setServe(tt.cfg, tt.dnsName, tt.srvType, tt.srvPort, tt.mountPath, tt.target, tt.allowFunnel, magicDNSSuffix, nil)
+			err := e.setServe(tt.cfg, tt.dnsName, tt.srvType, tt.srvPort, tt.mountPath, tt.target, tt.allowFunnel, magicDNSSuffix, nil, tt.proxyProtocol)
 			if err != nil && !tt.expectErr {
 				t.Fatalf("got error: %v; did not expect error.", err)
 			}
