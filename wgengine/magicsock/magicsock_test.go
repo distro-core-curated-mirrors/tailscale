@@ -2201,10 +2201,10 @@ func TestIsWireGuardOnlyPeer(t *testing.T) {
 	defer m.Close()
 
 	nm := &netmap.NetworkMap{
-		Name:       "ts",
 		PrivateKey: m.privateKey,
 		NodeKey:    m.privateKey.Public(),
 		SelfNode: (&tailcfg.Node{
+			Name:      "ts.",
 			Addresses: []netip.Prefix{tsaip},
 		}).View(),
 		Peers: nodeViews([]*tailcfg.Node{
@@ -2266,10 +2266,10 @@ func TestIsWireGuardOnlyPeerWithMasquerade(t *testing.T) {
 	defer m.Close()
 
 	nm := &netmap.NetworkMap{
-		Name:       "ts",
 		PrivateKey: m.privateKey,
 		NodeKey:    m.privateKey.Public(),
 		SelfNode: (&tailcfg.Node{
+			Name:      "ts.",
 			Addresses: []netip.Prefix{tsaip},
 		}).View(),
 		Peers: nodeViews([]*tailcfg.Node{
@@ -2403,10 +2403,10 @@ func TestIsWireGuardOnlyPickEndpointByPing(t *testing.T) {
 	wgEpV6 := netip.MustParseAddrPort(v6.LocalAddr().String())
 
 	nm := &netmap.NetworkMap{
-		Name:       "ts",
 		PrivateKey: m.privateKey,
 		NodeKey:    m.privateKey.Public(),
 		SelfNode: (&tailcfg.Node{
+			Name:      "ts.",
 			Addresses: []netip.Prefix{tsaip},
 		}).View(),
 		Peers: nodeViews([]*tailcfg.Node{

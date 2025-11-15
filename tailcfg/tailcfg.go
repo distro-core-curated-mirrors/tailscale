@@ -348,10 +348,10 @@ type Node struct {
 	Sharer UserID `json:",omitempty"`
 
 	Key          key.NodePublic
-	KeyExpiry    time.Time                  // the zero value if this node does not expire
+	KeyExpiry    time.Time                  `json:",omitzero"` // the zero value if this node does not expire
 	KeySignature tkatype.MarshaledSignature `json:",omitempty"`
-	Machine      key.MachinePublic
-	DiscoKey     key.DiscoPublic
+	Machine      key.MachinePublic          `json:",omitzero"`
+	DiscoKey     key.DiscoPublic            `json:",omitzero"`
 
 	// Addresses are the IP addresses of this Node directly.
 	Addresses []netip.Prefix

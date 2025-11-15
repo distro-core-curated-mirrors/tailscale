@@ -211,9 +211,7 @@ func TestRedactNetmapPrivateKeys(t *testing.T) {
 		f(netmap.NetworkMap{}, "DisplayMessages"):          false,
 		f(netmap.NetworkMap{}, "Domain"):                   false,
 		f(netmap.NetworkMap{}, "DomainAuditLogID"):         false,
-		f(netmap.NetworkMap{}, "Expiry"):                   false,
 		f(netmap.NetworkMap{}, "MachineKey"):               false,
-		f(netmap.NetworkMap{}, "Name"):                     false,
 		f(netmap.NetworkMap{}, "NodeKey"):                  false,
 		f(netmap.NetworkMap{}, "PacketFilter"):             false,
 		f(netmap.NetworkMap{}, "PacketFilterRules"):        false,
@@ -478,7 +476,6 @@ func TestRedactNetmapPrivateKeys(t *testing.T) {
 
 func TestHandleC2NDebugNetmap(t *testing.T) {
 	nm := &netmap.NetworkMap{
-		Name: "myhost",
 		SelfNode: (&tailcfg.Node{
 			ID:       100,
 			Name:     "myhost",
