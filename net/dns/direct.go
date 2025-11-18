@@ -21,6 +21,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"tailscale.com/feature"
@@ -29,6 +30,7 @@ import (
 	"tailscale.com/net/tsaddr"
 	"tailscale.com/types/logger"
 	"tailscale.com/util/dnsname"
+	"tailscale.com/util/eventbus"
 	"tailscale.com/version/distro"
 )
 
@@ -135,6 +137,11 @@ type directManager struct {
 	// but is better than having non-functioning DNS.
 	renameBroken bool
 
+	trampleCount  atomic.Int64
+	trampleTimer  *time.Timer
+	eventClient   *eventbus.Client
+	trampleDNSPub *eventbus.Publisher[TrampleDNS]
+
 	ctx      context.Context    // valid until Close
 	ctxClose context.CancelFunc // closes ctx
 
@@ -145,11 +152,11 @@ type directManager struct {
 }
 
 //lint:ignore U1000 used in manager_{freebsd,openbsd}.go
-func newDirectManager(logf logger.Logf, health *health.Tracker) *directManager {
-	return newDirectManagerOnFS(logf, health, directFS{})
+func newDirectManager(logf logger.Logf, health *health.Tracker, bus *eventbus.Bus) *directManager {
+	return newDirectManagerOnFS(logf, health, bus, directFS{})
 }
 
-func newDirectManagerOnFS(logf logger.Logf, health *health.Tracker, fs wholeFileFS) *directManager {
+func newDirectManagerOnFS(logf logger.Logf, health *health.Tracker, bus *eventbus.Bus, fs wholeFileFS) *directManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &directManager{
 		logf:     logf,
@@ -158,6 +165,13 @@ func newDirectManagerOnFS(logf logger.Logf, health *health.Tracker, fs wholeFile
 		ctx:      ctx,
 		ctxClose: cancel,
 	}
+	if bus != nil {
+		m.eventClient = bus.Client("dns.directManager")
+		m.trampleDNSPub = eventbus.Publish[TrampleDNS](m.eventClient)
+	}
+	m.trampleTimer = time.AfterFunc(5*time.Second, func() {
+		m.trampleCount.Store(0)
+	})
 	go m.runFileWatcher()
 	return m
 }
@@ -481,10 +495,25 @@ func (m *directManager) checkForFileTrample() {
 	}
 	m.logf("trample: resolv.conf changed from what we expected. did some other program interfere? current contents: %q", show)
 	m.health.SetUnhealthy(resolvTrampleWarnable, nil)
+	if m.trampleDNSPub != nil {
+		m.trampleCount.Add(1)
+		if m.trampleCount.Load() < 10 {
+			m.trampleDNSPub.Publish(TrampleDNS{
+				LastTrample:       time.Now(),
+				TramplesInTimeout: m.trampleCount.Load(),
+			})
+			m.trampleTimer.Reset(5 * time.Second)
+		} else {
+			m.logf("trample: resolv.conf was trampled too many times (%d). Abandoning trying to fix it.", m.trampleCount.Load())
+		}
+	}
 }
 
 func (m *directManager) Close() error {
 	m.ctxClose()
+	if m.eventClient != nil {
+		m.eventClient.Close()
+	}
 
 	// We used to keep a file for the tailscale config and symlinked
 	// to it, but then we stopped because /etc/resolv.conf being a
