@@ -642,8 +642,3 @@ func TestForeachInterface(t *testing.T) {
 		})
 	}
 }
-
-type testOSMon struct {
-	osMon
-	Interesting func(name string) bool
-}
