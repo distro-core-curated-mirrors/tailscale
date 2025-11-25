@@ -2,6 +2,10 @@
 # both PRs and merged commits, and for the latter reports failures to slack.
 name: CI
 
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: read # This is required for actions/checkout
+
 env:
   # Our fuzz job, powered by OSS-Fuzz, fails periodically because we upgrade to
   # new Go versions very eagerly. OSS-Fuzz is a little more conservative, and
@@ -211,7 +215,7 @@ jobs:
     # windows-8vpu is a 2022 GitHub-managed runner in our
     # org with 8 cores and 32 GB of RAM:
     # https://github.com/organizations/tailscale/settings/actions/github-hosted-runners/1
-    runs-on: windows-8vcpu
+    runs-on: ci-windows-github-1
     needs: gomod-cache
     name: Windows (${{ matrix.name || matrix.shard}})
     strategy:
@@ -220,8 +224,6 @@ jobs:
         include:
           - key: "win-bench"
             name: "benchmarks"
-          - key: "win-tool-go"
-            name: "./tool/go"
           - key: "win-shard-1-2"
             shard: "1/2"
           - key: "win-shard-2-2"
@@ -230,44 +232,31 @@ jobs:
     - name: checkout
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
-        path: src
+        path: ${{ github.workspace }}/src
 
     - name: Install Go
-      if: matrix.key != 'win-tool-go'
       uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
       with:
-        go-version-file: src/go.mod
+        go-version-file: ${{ github.workspace }}/src/go.mod
         cache: false
 
     - name: Restore Go module cache
-      if: matrix.key != 'win-tool-go'
       uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
       with:
         path: gomodcache
         key: ${{ needs.gomod-cache.outputs.cache-key }}
         enableCrossOsArchive: true
 
-    - name: Restore Cache
-      if: matrix.key != 'win-tool-go'
-      uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+    - name: Setup cigocacher
+      id: cigocacher-setup
+      uses: ./src/.github/actions/go-cache
       with:
-        path: |
-          ~/.cache/go-build
-          ~\AppData\Local\go-build
-        # The -2- here should be incremented when the scheme of data to be
-        # cached changes (e.g. path above changes).
-        key: ${{ github.job }}-${{ matrix.key }}-go-2-${{ hashFiles('**/go.sum') }}-${{ github.run_id }}
-        restore-keys: |
-          ${{ github.job }}-${{ matrix.key }}-go-2-${{ hashFiles('**/go.sum') }}
-          ${{ github.job }}-${{ matrix.key }}-go-2-
-
-    - name: test-tool-go
-      if: matrix.key == 'win-tool-go'
-      working-directory: src
-      run: ./tool/go version
+        checkout-path: ${{ github.workspace }}/src
+        cache-dir: ${{ github.workspace }}/cigocacher
+        cigocached-url: ${{ vars.CIGOCACHED_AZURE_URL }}
 
     - name: test
-      if: matrix.key != 'win-bench' && matrix.key != 'win-tool-go' # skip on bench builder
+      if: matrix.key != 'win-bench' # skip on bench builder
       working-directory: src
       run: go run ./cmd/testwrapper sharded:${{ matrix.shard }}
 
@@ -280,11 +269,24 @@ jobs:
       run: go test ./... -bench . -benchtime 1x -run "^$"
 
     - name: Tidy cache
-      if: matrix.key != 'win-tool-go'
-      working-directory: src
-      shell: bash
+      shell: pwsh
       run: |
-        find $(go env GOCACHE) -type f -mmin +90 -delete
+        Get-ChildItem -Path cigocacher -File -Recurse |
+          Where-Object { $_.LastAccessTime -lt (Get-Date).AddMinutes(-90) } |
+          Remove-Item -Force
+
+  win-tool-go:
+    runs-on: windows-latest
+    needs: gomod-cache
+    name: Windows (win-tool-go)
+    steps:
+    - name: checkout
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        path: src
+    - name: test-tool-go
+      working-directory: src
+      run: ./tool/go version
 
   privileged:
     needs: gomod-cache
