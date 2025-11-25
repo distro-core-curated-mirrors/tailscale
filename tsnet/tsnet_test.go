@@ -1393,3 +1393,172 @@ func TestDeps(t *testing.T) {
 		},
 	}.Check(t)
 }
+
+func TestResolveAuthKey(t *testing.T) {
+	tests := []struct {
+		name            string
+		authKey         string
+		clientSecret    string
+		clientID        string
+		idToken         string
+		oauthAvailable  bool
+		wifAvailable    bool
+		resolveViaOAuth oauthResolver
+		resolveViaWIF   wifResolver
+		wantAuthKey     string
+		wantErr         bool
+		wantErrContains string
+	}{
+		{
+			name:           "successful resolution via OAuth client secret",
+			clientSecret:   "tskey-client-secret-123",
+			oauthAvailable: true,
+			resolveViaOAuth: func(ctx context.Context, clientSecret string, tags []string) (string, error) {
+				if clientSecret != "tskey-client-secret-123" {
+					return "", fmt.Errorf("unexpected client secret: %s", clientSecret)
+				}
+				return "tskey-auth-via-oauth", nil
+			},
+			wantAuthKey: "tskey-auth-via-oauth",
+			wantErr:     false,
+		},
+		{
+			name:           "failing resolution via OAuth client secret",
+			clientSecret:   "tskey-client-secret-123",
+			oauthAvailable: true,
+			resolveViaOAuth: func(ctx context.Context, clientSecret string, tags []string) (string, error) {
+				return "", fmt.Errorf("resolution failed")
+			},
+			wantErr:         true,
+			wantErrContains: "resolution failed",
+		},
+		{
+			name:         "successful resolution via federated ID token",
+			clientID:     "client-id-123",
+			idToken:      "id-token-456",
+			wifAvailable: true,
+			resolveViaWIF: func(ctx context.Context, baseURL, clientID, idToken string, tags []string) (string, error) {
+				if clientID != "client-id-123" {
+					return "", fmt.Errorf("unexpected client ID: %s", clientID)
+				}
+				if idToken != "id-token-456" {
+					return "", fmt.Errorf("unexpected ID token: %s", idToken)
+				}
+				return "tskey-auth-via-wif", nil
+			},
+			wantAuthKey: "tskey-auth-via-wif",
+			wantErr:     false,
+		},
+		{
+			name:         "failing resolution via federated ID token",
+			clientID:     "client-id-123",
+			idToken:      "id-token-456",
+			wifAvailable: true,
+			resolveViaWIF: func(ctx context.Context, baseURL, clientID, idToken string, tags []string) (string, error) {
+				return "", fmt.Errorf("resolution failed")
+			},
+			wantErr:         true,
+			wantErrContains: "resolution failed",
+		},
+		{
+			name:         "empty client ID",
+			clientID:     "",
+			idToken:      "id-token-456",
+			wifAvailable: true,
+			resolveViaWIF: func(ctx context.Context, baseURL, clientID, idToken string, tags []string) (string, error) {
+				return "", fmt.Errorf("should not be called")
+			},
+			wantErr:         true,
+			wantErrContains: "empty",
+		},
+		{
+			name:         "empty ID token",
+			clientID:     "client-id-123",
+			idToken:      "",
+			wifAvailable: true,
+			resolveViaWIF: func(ctx context.Context, baseURL, clientID, idToken string, tags []string) (string, error) {
+				return "", fmt.Errorf("should not be called")
+			},
+			wantErr:         true,
+			wantErrContains: "empty",
+		},
+		{
+			name:           "authkey set and no resolution available",
+			authKey:        "tskey-auth-123",
+			oauthAvailable: false,
+			wifAvailable:   false,
+			wantAuthKey:    "tskey-auth-123",
+			wantErr:        false,
+		},
+		{
+			name:           "no authkey set and no resolution available",
+			oauthAvailable: false,
+			wifAvailable:   false,
+			wantAuthKey:    "",
+			wantErr:        false,
+		},
+		{
+			name:           "authkey is client secret and resolution via OAuth client secret succeeds",
+			authKey:        "tskey-client-secret-123",
+			oauthAvailable: true,
+			resolveViaOAuth: func(ctx context.Context, clientSecret string, tags []string) (string, error) {
+				if clientSecret != "tskey-client-secret-123" {
+					return "", fmt.Errorf("unexpected client secret: %s", clientSecret)
+				}
+				return "tskey-auth-via-oauth", nil
+			},
+			wantAuthKey: "tskey-auth-via-oauth",
+			wantErr:     false,
+		},
+		{
+			name:           "authkey is client secret but resolution via OAuth client secret fails",
+			authKey:        "tskey-client-secret-123",
+			oauthAvailable: true,
+			resolveViaOAuth: func(ctx context.Context, clientSecret string, tags []string) (string, error) {
+				return "", fmt.Errorf("resolution failed")
+			},
+			wantErr:         true,
+			wantErrContains: "resolution failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				AuthKey:      tt.authKey,
+				ClientSecret: tt.clientSecret,
+				ClientID:     tt.clientID,
+				IDToken:      tt.idToken,
+				ControlURL:   "https://control.example.com",
+			}
+			s.shutdownCtx = context.Background()
+
+			gotAuthKey, err := s.resolveAuthKey(
+				tt.oauthAvailable,
+				tt.wifAvailable,
+				tt.resolveViaOAuth,
+				tt.resolveViaWIF,
+			)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error but got none")
+					return
+				}
+				if tt.wantErrContains != "" && !strings.Contains(err.Error(), tt.wantErrContains) {
+					t.Errorf("expected error containing %q but got error: %v", tt.wantErrContains, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("resolveAuthKey expected no error but got error: %v", err)
+				return
+			}
+
+			if gotAuthKey != tt.wantAuthKey {
+				t.Errorf("resolveAuthKey() = %q, want %q", gotAuthKey, tt.wantAuthKey)
+			}
+		})
+	}
+}
