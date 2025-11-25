@@ -562,7 +562,7 @@ func NewLocalBackend(logf logger.Logf, logID logid.PublicID, sys *tsd.System, lo
 	b.interfaceState = netMon.InterfaceState()
 	// Call our linkChange code once with the current state.
 	// Following changes are triggered via the eventbus.
-	cd := netmon.NewChangeDelta(nil, b.interfaceState, false, netMon.TailscaleInterfaceName())
+	cd := netmon.NewChangeDelta(nil, b.interfaceState, false, netMon.TailscaleInterfaceName(), false)
 	b.linkChange(&cd)
 
 	if buildfeatures.HasPeerAPIServer {

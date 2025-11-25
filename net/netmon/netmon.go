@@ -116,12 +116,12 @@ type ChangeDelta struct {
 	// Computed Fields
 
 	DefaultInterfaceChanged     bool // whether default route interface changed
-	IsLessExpensive             bool // whether new state is less expensive than old
+	IsLessExpensive             bool // whether new state's default interface is less expensive than old.
 	HasPACOrProxyConfigChanged  bool // whether PAC/HTTP proxy config changed
 	InterfaceIPsChanged         bool // whether any interface IPs changed in a meaningful way
 	AvailableProtocolsChanged   bool // whether we have seen a change in available IPv4/IPv6
 	DefaultInterfaceMaybeViable bool // whether the default interface is potentially viable (has usable IPs, is up and is not the tunnel itself)
-	IsInitialState              bool // whether this is the initial state (old == nil)
+	IsInitialState              bool // whether this is the initial state (old == nil, new != nil)
 
 	// RebindLikelyRequired combines the various fields above to report whether this change likely requires us
 	// to rebind sockets.  This is a very conservative estimate and covers a number ofcases where a rebind
@@ -131,7 +131,9 @@ type ChangeDelta struct {
 }
 
 // NewChangeDelta builds a ChangeDelta and eagerly computes the cached fields.
-func NewChangeDelta(old, new *State, timeJumped bool, tsIfName string) ChangeDelta {
+// forceViability, if true, forces DefaultInterfaceMaybeViable to be true regardless of the
+// actual state of the default interface.  This is useful in testing.
+func NewChangeDelta(old, new *State, timeJumped bool, tsIfName string, forceViability bool) ChangeDelta {
 	cd := ChangeDelta{
 		Old:                old,
 		New:                new,
@@ -148,10 +150,10 @@ func NewChangeDelta(old, new *State, timeJumped bool, tsIfName string) ChangeDel
 		cd.InterfaceIPsChanged = true
 		cd.IsInitialState = true
 	} else {
-		cd.AvailableProtocolsChanged = cd.Old.HaveV4 != cd.New.HaveV4 || cd.Old.HaveV6 != cd.New.HaveV6
+		cd.AvailableProtocolsChanged = (cd.Old.HaveV4 != cd.New.HaveV4) || (cd.Old.HaveV6 != cd.New.HaveV6)
 		cd.DefaultInterfaceChanged = cd.Old.DefaultRouteInterface != cd.New.DefaultRouteInterface
 		cd.IsLessExpensive = cd.Old.IsExpensive && !cd.New.IsExpensive
-		cd.HasPACOrProxyConfigChanged = cd.Old.PAC != cd.New.PAC || cd.Old.HTTPProxy != cd.New.HTTPProxy
+		cd.HasPACOrProxyConfigChanged = (cd.Old.PAC != cd.New.PAC) || (cd.Old.HTTPProxy != cd.New.HTTPProxy)
 		cd.InterfaceIPsChanged = cd.isInterestingIntefaceChange()
 	}
 
@@ -160,18 +162,16 @@ func NewChangeDelta(old, new *State, timeJumped bool, tsIfName string) ChangeDel
 	cd.DefaultRouteInterface = new.DefaultRouteInterface
 	defIf := new.Interface[cd.DefaultRouteInterface]
 
-	cd.DefaultInterfaceMaybeViable = true
-
 	// The default interface is not viable if is down or is the Tailscale interface itself.
-	if !defIf.IsUp() || cd.DefaultRouteInterface == tsIfName {
+	if !forceViability && (!defIf.IsUp() || cd.DefaultRouteInterface == tsIfName) {
 		cd.DefaultInterfaceMaybeViable = false
+	} else {
+		cd.DefaultInterfaceMaybeViable = true
 	}
 
-	// Compute rebind requirement.  A number of these checks are redundant - HaveSomeAddressChanged
-	// subsumes InterfaceIPsChanged, IsExpensive likely does not change without a new interface
-	// appearing, but we'll keep them all for clarity and testability.
-	cd.RebindLikelyRequired = (cd.New == nil || // Do we need to rebind if there is no current state?
-		cd.Old == nil ||
+	// Compute rebind requirement.   The default interface needs to be viable and
+	// one of the other conditions needs to be true.
+	cd.RebindLikelyRequired = (cd.Old == nil ||
 		cd.TimeJumped ||
 		cd.DefaultInterfaceChanged ||
 		cd.InterfaceIPsChanged ||
@@ -180,25 +180,12 @@ func NewChangeDelta(old, new *State, timeJumped bool, tsIfName string) ChangeDel
 		cd.AvailableProtocolsChanged) &&
 		cd.DefaultInterfaceMaybeViable
 
-	// (barnstar) TODO: There are likely a number of optimizations we can do here to avoid
-	// rebinding in cases where it is not necessary but we really need to leave that to the
-	// upstream component.  If it's sockets are happy, then it probably doesn't need to rebind,
-	// but it may want to if any of these fields are true.
-
 	return cd
 }
 
 // StateDesc returns a description of the old and new states for logging
 func (cd *ChangeDelta) StateDesc() string {
 	return fmt.Sprintf("old: %v new: %v", cd.Old, cd.New)
-}
-
-// HasPAC reports whether the new state has a PAC configured.
-func (cd *ChangeDelta) HasPAC() bool {
-	if cd.New == nil {
-		return false
-	}
-	return cd.New.PAC != ""
 }
 
 // InterfaceIPAppeared reports whether the given IP address exists on any interface
@@ -236,6 +223,10 @@ func (cd *ChangeDelta) AnyInterfaceUp() bool {
 // This excludes interfaces that are not interesting per IsInterestingInterface and
 // filters out changes to interface IPs that that are uninteresting (e.g. link-local addresses).
 func (cd *ChangeDelta) isInterestingIntefaceChange() bool {
+	if cd.Old == nil && cd.New == nil {
+		return false
+	}
+
 	// If either side is nil treat as changed.
 	if cd.Old == nil || cd.New == nil {
 		return true
@@ -259,7 +250,7 @@ func (cd *ChangeDelta) isInterestingIntefaceChange() bool {
 		}
 
 		// The old interface doesn't exist in the new interface set and it has
-		// an a global unicast IP.  That's considered a change from the perspective
+		// a global unicast IP.  That's considered a change from the perspective
 		// of anything that may have been bound to it.  If it didn't have a global
 		// unicast IP, it's not interesting.
 		newInterface, ok := cd.New.Interface[iname]
@@ -618,7 +609,7 @@ func (m *Monitor) handlePotentialChange(newState *State, forceCallbacks bool) {
 		return
 	}
 
-	delta := NewChangeDelta(oldState, newState, timeJumped, m.tsIfName)
+	delta := NewChangeDelta(oldState, newState, timeJumped, m.tsIfName, false)
 
 	if delta.RebindLikelyRequired {
 		m.gwValid = false
