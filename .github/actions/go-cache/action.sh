@@ -45,6 +45,6 @@ if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
 fi
 BIN_PATH="${RUNNER_TEMP:-/tmp}/$BIN_NAME"
 
-./tool/go build -o "$BIN_PATH" ./cmd/cigocacher
+go build -o "$BIN_PATH" ./cmd/cigocacher
 echo "GOCACHEPROG=$BIN_PATH --cigocached-url $URL --token ${CIGOCACHER_TOKEN}" >> "$GITHUB_ENV"
 echo "success=true" >> "$GITHUB_OUTPUT"
