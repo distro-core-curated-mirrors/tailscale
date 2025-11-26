@@ -25,12 +25,12 @@ jobs:
     - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         key: ${{ matrix.key }}-dev-drive-${{ hashFiles('src/go.mod', 'src/go.sum') }}
-        path: D:\\dev_disk.vhdx
+        path: C:\\dev_disk.vhdx
     - uses: samypr100/setup-dev-drive@30f0f98ae5636b2b6501e181dfb3631b9974818d # v4.0.0
       with:
         drive-size: 10GB # 300GB available: https://docs.github.com/en/enterprise-cloud@latest/actions/reference/runners/larger-runners#machine-sizes-for-larger-runners
         workspace-copy: true
-        drive-path: D:\\dev_disk.vhdx
+        drive-path: C:\\dev_disk.vhdx
         mount-if-exists: true
 
     - name: Check restored cache
