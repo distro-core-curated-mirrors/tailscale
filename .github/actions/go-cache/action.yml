@@ -22,5 +22,6 @@ runs:
       shell: bash
       env:
         URL: ${{ inputs.cigocached-url }}
+        CACHE_DIR: ${{ inputs.cache-dir }}
       working-directory: ${{ inputs.checkout-path }}
       run: .github/actions/go-cache/action.sh

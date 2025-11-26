@@ -43,8 +43,8 @@ BIN_NAME="cigocacher"
 if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
     BIN_NAME="cigocacher.exe"
 fi
-BIN_PATH="${RUNNER_TEMP:-/tmp}/$BIN_NAME"
+BIN_PATH="${RUNNER_TEMP:-/tmp}/${BIN_NAME}"
 
-go build -o "$BIN_PATH" ./cmd/cigocacher
-echo "GOCACHEPROG=$BIN_PATH --cigocached-url $URL --token ${CIGOCACHER_TOKEN}" >> "$GITHUB_ENV"
-echo "success=true" >> "$GITHUB_OUTPUT"
+go build -o "${BIN_PATH}" ./cmd/cigocacher
+echo "GOCACHEPROG=${BIN_PATH} --cache-dir ${CACHE_DIR} --cigocached-url ${URL} --token ${CIGOCACHER_TOKEN}" >> "${GITHUB_ENV}"
+echo "success=true" >> "${GITHUB_OUTPUT}"

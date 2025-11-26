@@ -36,6 +36,7 @@ func main() {
 		auth          = flag.Bool("auth", false, "auth with cigocached and exit, printing the access token as output")
 		token         = flag.String("token", "", "the cigocached access token to use, as created using --auth")
 		cigocachedURL = flag.String("cigocached-url", "", "optional cigocached URL (scheme, host, and port). empty means to not use one.")
+		dir           = flag.String("cache-dir", "", "cache directory; empty means automatic")
 		verbose       = flag.Bool("verbose", false, "enable verbose logging")
 	)
 	flag.Parse()
@@ -54,18 +55,23 @@ func main() {
 		return
 	}
 
-	d, err := os.UserCacheDir()
-	if err != nil {
-		log.Fatal(err)
+	if *dir == "" {
+		d, err := os.UserCacheDir()
+		if err != nil {
+			log.Fatal(err)
+		}
+		*dir = filepath.Join(d, "go-cacher")
+		log.Printf("Defaulting to cache dir %v ...", *dir)
 	}
-	d = filepath.Join(d, "go-cacher")
-	log.Printf("Defaulting to cache dir %v ...", d)
-	if err := os.MkdirAll(d, 0750); err != nil {
+	if err := os.MkdirAll(*dir, 0750); err != nil {
 		log.Fatal(err)
 	}
 
 	c := &cigocacher{
-		disk:    &DiskCache{Dir: d},
+		disk: &DiskCache{
+			Dir:     *dir,
+			Verbose: *verbose,
+		},
 		verbose: *verbose,
 	}
 	if *cigocachedURL != "" {
@@ -80,8 +86,10 @@ func main() {
 	var p *cacheproc.Process
 	p = &cacheproc.Process{
 		Close: func() error {
-			log.Printf("gocacheprog: closing; %d gets (%d hits, %d misses, %d errors); %d puts (%d errors)",
-				p.Gets.Load(), p.GetHits.Load(), p.GetMisses.Load(), p.GetErrors.Load(), p.Puts.Load(), p.PutErrors.Load())
+			if c.verbose {
+				log.Printf("gocacheprog: closing; %d gets (%d hits, %d misses, %d errors); %d puts (%d errors)",
+					p.Gets.Load(), p.GetHits.Load(), p.GetMisses.Load(), p.GetErrors.Load(), p.Puts.Load(), p.PutErrors.Load())
+			}
 			return c.close()
 		},
 		Get: c.get,
@@ -235,12 +243,13 @@ func (c *cigocacher) put(ctx context.Context, actionID, outputID string, size in
 }
 
 func (c *cigocacher) close() error {
-	log.Printf("cigocacher HTTP stats: %d gets (%.1fMiB, %.2fs, %d hits, %d misses, %d errors ignored); %d puts (%.1fMiB, %.2fs, %d errors ignored)",
-		c.getHTTP.Load(), float64(c.getHTTPBytes.Load())/float64(1<<20), float64(c.getHTTPNanos.Load())/float64(time.Second), c.getHTTPHits.Load(), c.getHTTPMisses.Load(), c.getHTTPErrors.Load(),
-		c.putHTTP.Load(), float64(c.putHTTPBytes.Load())/float64(1<<20), float64(c.putHTTPNanos.Load())/float64(time.Second), c.putHTTPErrors.Load())
 	if !c.verbose || c.gocached == nil {
 		return nil
 	}
+
+	log.Printf("cigocacher HTTP stats: %d gets (%.1fMiB, %.2fs, %d hits, %d misses, %d errors ignored); %d puts (%.1fMiB, %.2fs, %d errors ignored)",
+		c.getHTTP.Load(), float64(c.getHTTPBytes.Load())/float64(1<<20), float64(c.getHTTPNanos.Load())/float64(time.Second), c.getHTTPHits.Load(), c.getHTTPMisses.Load(), c.getHTTPErrors.Load(),
+		c.putHTTP.Load(), float64(c.putHTTPBytes.Load())/float64(1<<20), float64(c.putHTTPNanos.Load())/float64(time.Second), c.putHTTPErrors.Load())
 
 	stats, err := c.gocached.fetchStats()
 	if err != nil {

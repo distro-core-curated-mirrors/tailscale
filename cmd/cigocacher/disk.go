@@ -170,6 +170,7 @@ func writeAtomic(dest string, r io.Reader) (int64, error) {
 		os.Remove(tf.Name())
 		if runtime.GOOS == "windows" {
 			if st, statErr := os.Stat(dest); statErr == nil && st.Size() == size {
+				log.Printf("DEBUG: WE DID THE WINTHING")
 				return size, nil
 			} else {
 				log.Printf("DEBUG: %v", statErr)
