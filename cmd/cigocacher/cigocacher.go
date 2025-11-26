@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/bradfitz/go-tool-cache/cacheproc"
-	"github.com/bradfitz/go-tool-cache/cachers"
 )
 
 func main() {
@@ -66,7 +65,7 @@ func main() {
 	}
 
 	c := &cigocacher{
-		disk:    &cachers.DiskCache{Dir: d},
+		disk:    &DiskCache{Dir: d},
 		verbose: *verbose,
 	}
 	if *cigocachedURL != "" {
@@ -115,7 +114,7 @@ func httpClient() *http.Client {
 }
 
 type cigocacher struct {
-	disk     *cachers.DiskCache
+	disk     *DiskCache
 	gocached *gocachedClient
 	verbose  bool
 
