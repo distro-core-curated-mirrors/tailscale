@@ -32,6 +32,7 @@ jobs:
         workspace-copy: true
         drive-path: C:\\dev_disk.vhdx
         mount-if-exists: true
+        mount-path: "E:"
 
     - name: Check restored cache
       shell: pwsh
