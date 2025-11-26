@@ -276,9 +276,11 @@ jobs:
 
     - name: Tidy cache
       working-directory: ${{ env.DEV_DRIVE_WORKSPACE }}/src
-      shell: bash
+      shell: pwsh
       run: |
-        find ${{ env.DEV_DRIVE_WORKSPACE }}/cigocacher -type f -mmin +90 -delete
+        Get-ChildItem -Path "${{ env.DEV_DRIVE_WORKSPACE }}\cigocacher" -File -Recurse |
+          Where-Object { $_.LastAccessTime -lt (Get-Date).AddMinutes(-90) } |
+          Remove-Item -Force
 
   win-tool-go:
     # windows-8vpu is a 2022 GitHub-managed runner in our

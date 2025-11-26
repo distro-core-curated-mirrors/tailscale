@@ -53,7 +53,7 @@ func (dc *DiskCache) Get(ctx context.Context, actionID string) (outputID, diskPa
 				dc.logf("disk miss: %v", actionID)
 			}
 		}
-		return "", "", err
+		return "", "", fmt.Errorf("failed to os.ReadFile in Get: %w", err)
 	}
 	var ie indexEntry
 	if err := json.Unmarshal(ij, &ie); err != nil {
@@ -146,7 +146,7 @@ func (dc *DiskCache) Put(ctx context.Context, actionID, outputID string, size in
 		return "", err
 	}
 	if _, err := writeAtomic(actionFile, bytes.NewReader(ij)); err != nil {
-		return "", err
+		return "", fmt.Errorf("atomic write failed: %w", err)
 	}
 	return outputFile, nil
 }
