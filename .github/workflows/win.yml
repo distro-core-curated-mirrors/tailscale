@@ -1,0 +1,81 @@
+name: win-ci
+
+on:
+  push:
+
+jobs:
+  windows:
+    runs-on: ci-windows-github-1
+    name: Windows (${{ matrix.name || matrix.shard}})
+    strategy:
+      fail-fast: false # don't abort the entire matrix if one element fails
+      matrix:
+        include:
+          - key: "win-bench"
+            name: "benchmarks"
+          - key: "win-shard-1-2"
+            shard: "1/2"
+          - key: "win-shard-2-2"
+            shard: "2/2"
+    steps:
+    - name: checkout
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        path: src
+    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        key: go-win-dev-drive-${{ hashFiles('src/go.mod', 'src/go.sum') }}"
+        path: C:\\dev_disk.vhdx
+    - uses: samypr100/setup-dev-drive@30f0f98ae5636b2b6501e181dfb3631b9974818d # v4.0.0
+      with:
+        drive-size: 10GB # 300GB available: https://docs.github.com/en/enterprise-cloud@latest/actions/reference/runners/larger-runners#machine-sizes-for-larger-runners
+        workspace-copy: true
+        drive-path: C:\\dev_disk.vhdx
+        mount-if-exists: true
+
+    - name: Install Go
+      uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+      with:
+        go-version-file: ${{ env.DEV_DRIVE_WORKSPACE }}/src/go.mod
+        cache: false
+
+    - name: test
+      if: matrix.key != 'win-bench' # skip on bench builder
+      working-directory: ${{ env.DEV_DRIVE_WORKSPACE }}/src
+      env:
+        GOCACHE: ${{ env.DEV_DRIVE }}/gocache
+        GOMODCACHE: ${{ env.DEV_DRIVE }}/gomodcache
+      run: go run ./cmd/testwrapper sharded:${{ matrix.shard }}
+
+    - name: bench all
+      if: matrix.key == 'win-bench'
+      working-directory: ${{ env.DEV_DRIVE_WORKSPACE }}/src
+      env:
+        GOCACHE: ${{ env.DEV_DRIVE }}/gocache
+        GOMODCACHE: ${{ env.DEV_DRIVE }}/gomodcache
+      # Don't use -bench=. -benchtime=1x.
+      # Somewhere in the layers (powershell?)
+      # the equals signs cause great confusion.
+      run: go test ./... -bench . -benchtime 1x -run "^$"
+
+    - name: Tidy cache
+      shell: pwsh
+      run: |
+        Get-ChildItem -Path "${{ env.DEV_DRIVE }}/gocache" -File -Recurse |
+          Where-Object { $_.LastAccessTime -lt (Get-Date).AddMinutes(-90) } |
+          Remove-Item -Force
+
+  win-tool-go:
+    # windows-8vpu is a 2022 GitHub-managed runner in our
+    # org with 8 cores and 32 GB of RAM:
+    # https://github.com/organizations/tailscale/settings/actions/github-hosted-runners/1
+    runs-on: windows-8vcpu
+    name: Windows (win-tool-go)
+    steps:
+    - name: checkout
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        path: src
+    - name: test-tool-go
+      working-directory: src
+      run: ./tool/go version
