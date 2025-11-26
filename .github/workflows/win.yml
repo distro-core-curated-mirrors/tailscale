@@ -33,6 +33,12 @@ jobs:
         drive-path: C:\\dev_disk.vhdx
         mount-if-exists: true
 
+    - name: Check restored cache
+      shell: pwsh
+      run: |
+        Get-ChildItem -Recurse ${{ env.DEV_DRIVE }}/gocache
+        Get-ChildItem -Recurse ${{ env.DEV_DRIVE }}/gomodcache
+
     - name: Install Go
       uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
       with:
