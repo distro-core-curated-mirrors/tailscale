@@ -72,6 +72,20 @@ jobs:
       # the equals signs cause great confusion.
       run: go test ./... -bench . -benchtime 1x -run "^$"
 
+    - name: Check filled cache
+      shell: pwsh
+      run: |
+        if (Test-Path "${{ env.DEV_DRIVE }}/gocache") {
+          Get-ChildItem -Recurse ${{ env.DEV_DRIVE }}/gocache
+        } else {
+          Write-Host "gocache directory does not exist yet"
+        }
+        if (Test-Path "${{ env.DEV_DRIVE }}/gomodcache") {
+          Get-ChildItem -Recurse ${{ env.DEV_DRIVE }}/gomodcache
+        } else {
+          Write-Host "gomodcache directory does not exist yet"
+        }
+
     - name: Tidy cache
       shell: pwsh
       run: |
