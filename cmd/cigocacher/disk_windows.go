@@ -20,7 +20,7 @@ func (dc *DiskCache) writeActionFile(b []byte, actionID string) (retErr error) {
 	defer func() {
 		cerr := f.Close()
 		if retErr != nil || cerr != nil {
-			retErr = errors.Join(retErr, cerr)
+			retErr = errors.Join(retErr, cerr, os.Remove(dest))
 		}
 	}()
 
@@ -77,7 +77,7 @@ func (dc *DiskCache) writeOutputFile(r io.Reader, size int64, outputID string) (
 	defer func() {
 		cerr := f.Close()
 		if retErr != nil || cerr != nil {
-			retErr = errors.Join(retErr, cerr)
+			retErr = errors.Join(retErr, cerr, os.Remove(dest))
 		}
 	}()
 
