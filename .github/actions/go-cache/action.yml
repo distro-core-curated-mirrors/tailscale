@@ -8,6 +8,9 @@ inputs:
   checkout-path:
     description: Path to cloned repository
     required: true
+  cache-dir:
+    description: Directory to use for caching
+    required: true
 
 outputs:
   success:

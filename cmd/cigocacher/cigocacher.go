@@ -75,7 +75,9 @@ func main() {
 		verbose: *verbose,
 	}
 	if *cigocachedURL != "" {
-		log.Printf("Using cigocached at %s", *cigocachedURL)
+		if *verbose {
+			log.Printf("Using cigocached at %s", *cigocachedURL)
+		}
 		c.gocached = &gocachedClient{
 			baseURL:     *cigocachedURL,
 			cl:          httpClient(),
