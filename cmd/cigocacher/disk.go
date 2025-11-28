@@ -4,7 +4,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,7 +12,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 )
 
@@ -119,21 +117,12 @@ func (dc *DiskCache) Put(ctx context.Context, actionID, outputID string, size in
 		return "", fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Special case empty files; they're both common and easier to do race-free.
-	if size == 0 {
-		zf, err := os.OpenFile(outputFile, os.O_CREATE|os.O_RDWR, 0644)
-		if err != nil {
-			return "", err
-		}
-		zf.Close()
-	} else {
-		wrote, err := writeAtomic(outputFile, body)
-		if err != nil {
-			return "", err
-		}
-		if wrote != size {
-			return "", fmt.Errorf("wrote %d bytes, expected %d", wrote, size)
-		}
+	wrote, err := dc.writeOutputFile(body, size, outputID)
+	if err != nil {
+		return "", err
+	}
+	if wrote != size {
+		return "", fmt.Errorf("wrote %d bytes, expected %d", wrote, size)
 	}
 
 	ij, err := json.Marshal(indexEntry{
@@ -145,41 +134,8 @@ func (dc *DiskCache) Put(ctx context.Context, actionID, outputID string, size in
 	if err != nil {
 		return "", err
 	}
-	if _, err := writeAtomic(actionFile, bytes.NewReader(ij)); err != nil {
+	if err := dc.writeActionFile(ij, actionID); err != nil {
 		return "", fmt.Errorf("atomic write failed: %w", err)
 	}
 	return outputFile, nil
-}
-
-func writeAtomic(dest string, r io.Reader) (int64, error) {
-	tf, err := os.CreateTemp(filepath.Dir(dest), filepath.Base(dest)+".*")
-	if err != nil {
-		return 0, err
-	}
-	size, err := io.Copy(tf, r)
-	if err != nil {
-		tf.Close()
-		os.Remove(tf.Name())
-		return 0, err
-	}
-	if err := tf.Close(); err != nil {
-		os.Remove(tf.Name())
-		return 0, err
-	}
-	if err := os.Rename(tf.Name(), dest); err != nil {
-		os.Remove(tf.Name())
-		if runtime.GOOS == "windows" {
-			if st, statErr := os.Stat(dest); statErr == nil && st.Size() == size {
-				log.Printf("DEBUG: WE DID THE WINTHING")
-				return size, nil
-			} else {
-				log.Printf("DEBUG: %v", statErr)
-				if st != nil {
-					log.Printf("DEBUG: size=%d, wanted %d", st.Size(), size)
-				}
-			}
-		}
-		return 0, err
-	}
-	return size, nil
 }

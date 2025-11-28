@@ -171,10 +171,6 @@ func (c *cigocacher) get(ctx context.Context, actionID string) (outputID, diskPa
 
 	defer res.Body.Close()
 
-	// TODO(tomhjp): make sure we timeout if cigocached disappears, but for some
-	// reason, this seemed to tank network performance.
-	// ctx, cancel := context.WithTimeout(ctx, httpTimeout(res.ContentLength))
-	// defer cancel()
 	diskPath, err = c.disk.Put(ctx, actionID, outputID, res.ContentLength, res.Body)
 	if err != nil {
 		return "", "", fmt.Errorf("error filling disk cache from HTTP: %w", err)
@@ -213,10 +209,6 @@ func (c *cigocacher) put(ctx context.Context, actionID, outputID string, size in
 	}
 	httpErrCh := make(chan error)
 	go func() {
-		// TODO(tomhjp): make sure we timeout if cigocached disappears, but for some
-		// reason, this seemed to tank network performance.
-		// ctx, cancel := context.WithTimeout(ctx, httpTimeout(size))
-		// defer cancel()
 		t0HTTP := time.Now()
 		defer func() {
 			c.putHTTPNanos.Add(time.Since(t0HTTP).Nanoseconds())
