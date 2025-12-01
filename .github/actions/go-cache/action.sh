@@ -26,6 +26,8 @@ JWT="$(curl -sSL -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${A
 # cigocached serves a TLS cert with an FQDN, but DNS is based on VM name.
 HOST_AND_PORT="${URL#http*://}"
 FIRST_LABEL="${HOST_AND_PORT/.*/}"
+# Save CONNECT_TO for later steps to use.
+echo "CONNECT_TO=${HOST_AND_PORT}:${FIRST_LABEL}:" >> "${GITHUB_ENV}"
 BODY="$(jq -n --arg jwt "$JWT" '{"jwt": $jwt}')"
 CIGOCACHER_TOKEN="$(curl -sSL --connect-to "$HOST_AND_PORT:$FIRST_LABEL:" -H "Content-Type: application/json" "$URL/auth/exchange-token" -d "$BODY" | jq -r .access_token)"
 if [ -z "$CIGOCACHER_TOKEN" ]; then
@@ -38,12 +40,9 @@ fi
 # TODO(tomhjp): bake cigocacher into runner image and use it for auth.
 echo "Fetched cigocacher token successfully"
 echo "::add-mask::${CIGOCACHER_TOKEN}"
+echo "CIGOCACHER_TOKEN=${CIGOCACHER_TOKEN}" >> "${GITHUB_ENV}"
 
-BIN_NAME="cigocacher"
-if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
-    BIN_NAME="cigocacher.exe"
-fi
-BIN_PATH="${RUNNER_TEMP:-/tmp}/${BIN_NAME}"
+BIN_PATH="${RUNNER_TEMP:-/tmp}/cigocacher$(go env GOEXE)"
 
 go build -o "${BIN_PATH}" ./cmd/cigocacher
 echo "GOCACHEPROG=${BIN_PATH} --cache-dir ${CACHE_DIR} --cigocached-url ${URL} --token ${CIGOCACHER_TOKEN}" >> "${GITHUB_ENV}"
