@@ -22,9 +22,6 @@ env:
 
 on:
   push:
-    branches:
-      - "main"
-      - "release-branch/*"
   pull_request:
     # all PRs on all branches
   merge_group:
@@ -806,51 +803,6 @@ jobs:
           "env GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }}" \
            honnef.co/go/tools/cmd/staticcheck -- \
            $(./tool/go run ./tool/listpkgs --ignore-3p --goos=${{ matrix.goos }} --goarch=${{ matrix.goarch }} ${{ matrix.flags }} ./...)
-
-  notify_slack:
-    if: always()
-    # Any of these jobs failing causes a slack notification.
-    needs: 
-      - android
-      - test
-      - windows
-      - vm
-      - cross
-      - ios
-      - wasm
-      - tailscale_go
-      - fuzz
-      - depaware
-      - go_generate
-      - go_mod_tidy
-      - licenses
-      - staticcheck
-    runs-on: ubuntu-24.04
-    steps:
-    - name: notify  
-      # Only notify slack for merged commits, not PR failures.
-      #
-      # It may be tempting to move this condition into the job's 'if' block, but
-      # don't: Github only collapses the test list into "everything is OK" if
-      # all jobs succeeded. A skipped job results in the list staying expanded.
-      # By having the job always run, but skipping its only step as needed, we
-      # let the CI output collapse nicely in PRs.
-      if: failure() && github.event_name == 'push'
-      uses: slackapi/slack-github-action@91efab103c0de0a537f72a35f6b8cda0ee76bf0a # v2.1.1
-      with:
-        webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
-        webhook-type: incoming-webhook
-        payload: |
-          {
-            "attachments": [{
-              "title": "Failure: ${{ github.workflow }}",
-              "title_link": "https://github.com/${{ github.repository }}/commit/${{ github.sha }}/checks",         
-              "text": "${{ github.repository }}@${{ github.ref_name }}: <https://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>",
-              "fields": [{ "value": ${{ toJson(github.event.head_commit.message) }}, "short": false }],
-              "footer": "${{ github.event.head_commit.committer.name }} at ${{ github.event.head_commit.timestamp }}",
-              "color": "danger"
-            }]
-          }
 
   merge_blocker:
     if: always()
