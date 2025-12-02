@@ -64,8 +64,8 @@ type Build struct {
 	Tmp string
 	// Go is the path to the Go binary to use for building.
 	Go string
-	// Yarn is the path to the yarn binary to use for building the web client assets.
-	Yarn string
+	// Bun is the path to the bun binary to use for building the web client assets.
+	Bun string
 	// Version is the version info of the build.
 	Version mkversion.VersionInfo
 	// Time is the timestamp of the build.
@@ -108,16 +108,16 @@ func NewBuild(repo, out string) (*Build, error) {
 	if err != nil {
 		return nil, fmt.Errorf("finding go binary: %w", err)
 	}
-	yarnTool, err := findTool(repo, "yarn")
+	bunTool, err := findTool(repo, "bun")
 	if err != nil {
-		return nil, fmt.Errorf("finding yarn binary: %w", err)
+		return nil, fmt.Errorf("finding bun binary: %w", err)
 	}
 	b := &Build{
 		Repo:         repo,
 		Tmp:          tmp,
 		Out:          out,
 		Go:           goTool,
-		Yarn:         yarnTool,
+		Bun:          bunTool,
 		Version:      mkversion.Info(),
 		Time:         time.Now().UTC(),
 		extra:        map[any]any{},
@@ -231,10 +231,10 @@ func (b *Build) BuildWebClientAssets() error {
 			return nil
 		}
 		dir := b.WebClientSource
-		if err := b.Command(dir, b.Yarn, "install").Run(); err != nil {
+		if err := b.Command(dir, b.Bun, "install").Run(); err != nil {
 			return err
 		}
-		if err := b.Command(dir, b.Yarn, "build").Run(); err != nil {
+		if err := b.Command(dir, b.Bun, "build").Run(); err != nil {
 			return err
 		}
 		return nil

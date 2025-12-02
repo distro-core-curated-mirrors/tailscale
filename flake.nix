@@ -134,6 +134,7 @@
     devShells = eachSystem (pkgs: {
       devShell = pkgs.mkShell {
         packages = with pkgs; [
+          bun
           curl
           git
           gopls

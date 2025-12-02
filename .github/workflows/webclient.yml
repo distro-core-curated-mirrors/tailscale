@@ -24,15 +24,15 @@ jobs:
       - name: Check out code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install deps
-        run: ./tool/yarn --cwd client/web
+        run: ./tool/bun install --cwd client/web
       - name: Run lint
-        run: ./tool/yarn --cwd client/web run --silent lint
+        run: ./tool/bun run --cwd client/web --silent lint
       - name: Run test
-        run: ./tool/yarn --cwd client/web run --silent test
+        run: ./tool/bun run --cwd client/web --silent test
       - name: Run formatter check
         run: |
-          ./tool/yarn --cwd client/web run --silent format-check || ( \
+          ./tool/bun run --cwd client/web --silent format-check || ( \
             echo "Run this command on your local device to fix the error:" && \
             echo "" && \
-            echo "  ./tool/yarn --cwd client/web format" && \
+            echo "  ./tool/bun format --cwd client/web" && \
             echo "" && exit 1)

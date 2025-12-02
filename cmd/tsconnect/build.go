@@ -23,7 +23,7 @@ func runBuild() {
 	}
 
 	log.Printf("Linting...\n")
-	if err := runYarn("lint"); err != nil {
+	if err := runBun("run", "lint"); err != nil {
 		log.Fatalf("Linting failed: %v", err)
 	}
 

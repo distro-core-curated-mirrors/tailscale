@@ -24,7 +24,7 @@ func runBuildPkg() {
 	}
 
 	log.Printf("Linting...\n")
-	if err := runYarn("lint"); err != nil {
+	if err := runBun("run", "lint"); err != nil {
 		log.Fatalf("Linting failed: %v", err)
 	}
 
@@ -44,7 +44,7 @@ func runBuildPkg() {
 	}
 
 	log.Printf("Generating types...\n")
-	if err := runYarn("pkg-types"); err != nil {
+	if err := runBun("run", "pkg-types"); err != nil {
 		log.Fatalf("Type generation failed: %v", err)
 	}
 

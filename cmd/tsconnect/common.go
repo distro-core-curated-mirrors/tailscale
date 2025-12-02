@@ -34,8 +34,8 @@ func commonSetup(dev bool) (*esbuild.BuildOptions, error) {
 	if err != nil {
 		return nil, err
 	}
-	if *yarnPath == "" {
-		*yarnPath = path.Join(root, "tool", "yarn")
+	if *bunPath == "" {
+		*bunPath = path.Join(root, "tool", "bun")
 	}
 	tsConnectDir := filepath.Join(root, "cmd", "tsconnect")
 	if err := os.Chdir(tsConnectDir); err != nil {
@@ -288,11 +288,11 @@ func runWasmOpt(path string) error {
 // installJSDeps installs the JavaScript dependencies specified by package.json
 func installJSDeps() error {
 	log.Printf("Installing JS deps...\n")
-	return runYarn()
+	return runBun("install")
 }
 
-func runYarn(args ...string) error {
-	cmd := exec.Command(*yarnPath, args...)
+func runBun(args ...string) error {
+	cmd := exec.Command(*bunPath, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -315,11 +315,11 @@ func setupEsbuildTailwind(build esbuild.PluginBuild, dev bool) {
 		Filter: "./src/.*\\.css$",
 	}, func(args esbuild.OnLoadArgs) (esbuild.OnLoadResult, error) {
 		start := time.Now()
-		yarnArgs := []string{"--silent", "tailwind", "-i", args.Path}
+		bunArgs := []string{"run", "tailwind", "--silent", "-i", args.Path}
 		if !dev {
-			yarnArgs = append(yarnArgs, "--minify")
+			bunArgs = append(bunArgs, "--minify")
 		}
-		cmd := exec.Command(*yarnPath, yarnArgs...)
+		cmd := exec.Command(*bunPath, bunArgs...)
 		tailwindOutput, err := cmd.Output()
 		log.Printf("Ran tailwind in %v\n", time.Since(start).Round(time.Millisecond))
 		if err != nil {

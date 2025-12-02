@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Run a command with our local bun install, rather than any globally installed
+# instance.
+
+set -euo pipefail
+
+if [[ "${CI:-}" == "true" ]]; then
+    set -x
+fi
+
+(
+    if [[ "${CI:-}" == "true" ]]; then
+        set -x
+    fi
+
+    repo_root="${BASH_SOURCE%/*}/../"
+    cd "$repo_root"
+
+    cachedir="$HOME/.cache/tailscale-bun"
+    zipfile="${cachedir}.zip"
+
+    read -r want_rev < "./tool/bun.rev"
+
+    got_rev=""
+    if [[ -x "${cachedir}/bun" ]]; then
+        got_rev=$("${cachedir}/bun" --version)
+    fi
+
+    if [[ "$want_rev" != "$got_rev" ]]; then
+        # Detect platform
+        os=$(uname -s | tr '[:upper:]' '[:lower:]')
+        arch=$(uname -m)
+        
+        # Map architecture names to bun's naming convention
+        case "$arch" in
+            x86_64)
+                arch="x64"
+                ;;
+            aarch64|arm64)
+                arch="aarch64"
+                ;;
+            *)
+                echo "Unsupported architecture: $arch" >&2
+                exit 1
+                ;;
+        esac
+        
+        # Map OS names to bun's naming convention
+        case "$os" in
+            linux)
+                platform="linux-${arch}"
+                ;;
+            darwin)
+                platform="darwin-${arch}"
+                ;;
+            *)
+                echo "Unsupported OS: $os" >&2
+                exit 1
+                ;;
+        esac
+        
+        rm -rf "$cachedir" "$zipfile"
+        mkdir -p "$cachedir"
+        curl -f -L -o "$zipfile" "https://github.com/oven-sh/bun/releases/download/bun-v${want_rev}/bun-${platform}.zip"
+        unzip -q "$zipfile" -d "$cachedir"
+        mv "${cachedir}/bun-${platform}"/* "${cachedir}/"
+        rmdir "${cachedir}/bun-${platform}"
+        rm -f "$zipfile"
+    fi
+)
+
+# Deliberately not using cachedir here, to keep the environment
+# completely pristine for execution of bun.
+export PATH="$HOME/.cache/tailscale-bun:$PATH"
+exec "$HOME/.cache/tailscale-bun/bun" "$@"

@@ -77,14 +77,14 @@ func startDevServer() (cleanup func()) {
 	root := gitRootDir()
 	webClientPath := filepath.Join(root, "client", "web")
 
-	yarn := filepath.Join(root, "tool", "yarn")
+	bun := filepath.Join(root, "tool", "bun")
 	node := filepath.Join(root, "tool", "node")
 	vite := filepath.Join(webClientPath, "node_modules", ".bin", "vite")
 
-	log.Printf("installing JavaScript deps using %s...", yarn)
-	out, err := exec.Command(yarn, "--non-interactive", "-s", "--cwd", webClientPath, "install").CombinedOutput()
+	log.Printf("installing JavaScript deps using %s...", bun)
+	out, err := exec.Command(bun, "install", "--non-interactive", "-s", "--cwd", webClientPath).CombinedOutput()
 	if err != nil {
-		log.Fatalf("error running tailscale web's yarn install: %v, %s", err, out)
+		log.Fatalf("error running tailscale web's bun install: %v, %s", err, out)
 	}
 	log.Printf("starting JavaScript dev server...")
 	cmd := exec.Command(node, vite)
@@ -112,7 +112,7 @@ func devServerProxy() *httputil.ReverseProxy {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusBadGateway)
 		w.Write([]byte("The web client development server isn't running. " +
-			"Run `./tool/yarn --cwd client/web start` from " +
+			"Run `./tool/bun start --cwd client/web` from " +
 			"the repo root to start the development server."))
 		w.Write([]byte("\n\nError: " + err.Error()))
 	}

@@ -46,15 +46,15 @@ func build(toolDir, appDir string) error {
 		return fmt.Errorf("Cannot change cwd: %w", err)
 	}
 
-	if err := yarn(toolDir); err != nil {
+	if err := bun(toolDir, "install"); err != nil {
 		return fmt.Errorf("install failed: %w", err)
 	}
 
-	if err := yarn(toolDir, "lint"); err != nil {
+	if err := bun(toolDir, "lint"); err != nil {
 		return fmt.Errorf("lint failed: %w", err)
 	}
 
-	if err := yarn(toolDir, "build", "--outDir="+*outDir, "--emptyOutDir"); err != nil {
+	if err := bun(toolDir, "build", "--outDir="+*outDir, "--emptyOutDir"); err != nil {
 		return fmt.Errorf("build failed: %w", err)
 	}
 
@@ -82,9 +82,9 @@ func build(toolDir, appDir string) error {
 	return nil
 }
 
-func yarn(toolDir string, args ...string) error {
+func bun(toolDir string, args ...string) error {
 	args = append([]string{"--silent", "--non-interactive"}, args...)
-	return run(filepath.Join(toolDir, "yarn"), args...)
+	return run(filepath.Join(toolDir, "bun"), args...)
 }
 
 func run(name string, args ...string) error {
