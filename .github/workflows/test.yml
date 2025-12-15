@@ -279,12 +279,12 @@ jobs:
       run: go test ./... -bench . -benchtime 1x -run "^$"
 
     - name: Print stats
-      shell: pwsh
+      shell: bash
       if: steps.cigocacher-setup.outputs.success == 'true'
       env:
         GOCACHEPROG: ${{ env.GOCACHEPROG }}
       run: |
-        & $env:GOCACHEPROG --stats | jq .
+        eval "$GOCACHEPROG --stats" | jq .
 
   # win-tool-go:
   #   runs-on: windows-latest
