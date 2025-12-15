@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 #
 # Run cmd/cigocacher based on the revision pinned in tool/cigocacher.rev
+# Note, unlike our other tools, this one never sets -x because it may
+# print sensitive auth tokens. These should be masked by GitHub, but better
+# to be safe.
 
 set -euo pipefail
 
@@ -42,17 +45,9 @@ goarch() {
     esac
 }
 
-if [[ "${CI:-}" == "true" ]]; then
-    set -x
-fi
-
 cachedir="${HOME}/.cache/tailscale-cigocacher"
 
 (
-    if [[ "${CI:-}" == "true" ]]; then
-        set -x
-    fi
-
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
     repo_root="${SCRIPT_DIR}/../"
     cd "$repo_root"
@@ -62,14 +57,14 @@ cachedir="${HOME}/.cache/tailscale-cigocacher"
     want_rev="$(cat ./tool/cigocacher.rev)"
     got_rev=""
     if [[ -x "${cachedir}/cigocacher" ]]; then
-        got_rev=$("${cachedir}/cigocacher" --version)
+        got_rev=$("${cachedir}/cigocacher" --version | tr -d '\r\n')
     fi
 
     if [[ "$want_rev" != "$got_rev" ]]; then
+        echo "Downloading cigocacher rev ${want_rev} (got ${got_rev})" >&2
         rm -rf "$cachedir" "$tarball"
         mkdir -p "$cachedir"
-        curl -w "%{size_download} bytes | %{time_total}s | %{speed_download} bytes/sec\n" -fsSL -o "$tarball" \
-            "https://github.com/tailscale/tailscale/releases/download/cmd%2Fcigocacher%2F${want_rev}/cigocacher-$(goos)-$(goarch).tar.gz"
+        curl -fsSL -o "$tarball" "https://github.com/tailscale/tailscale/releases/download/cmd%2Fcigocacher%2F${want_rev}/cigocacher-$(goos)-$(goarch).tar.gz"
         (cd "$cachedir" && tar -xf "$tarball")
         rm -f "$tarball"
     fi
