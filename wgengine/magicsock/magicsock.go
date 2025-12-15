@@ -178,9 +178,10 @@ type Conn struct {
 
 	// A publisher for synchronization points to ensure correct ordering of
 	// config changes between magicsock and wireguard.
-	syncPub               *eventbus.Publisher[syncPoint]
-	allocRelayEndpointPub *eventbus.Publisher[UDPRelayAllocReq]
-	portUpdatePub         *eventbus.Publisher[router.PortUpdate]
+	syncPub                  *eventbus.Publisher[syncPoint]
+	allocRelayEndpointPub    *eventbus.Publisher[UDPRelayAllocReq]
+	portUpdatePub            *eventbus.Publisher[router.PortUpdate]
+	tsmpDiscoKeyAvailablePub *eventbus.Publisher[NewDiscoKeyAvailable]
 
 	// pconn4 and pconn6 are the underlying UDP sockets used to
 	// send/receive packets for wireguard and other magicsock
@@ -691,6 +692,7 @@ func NewConn(opts Options) (*Conn, error) {
 	c.syncPub = eventbus.Publish[syncPoint](ec)
 	c.allocRelayEndpointPub = eventbus.Publish[UDPRelayAllocReq](ec)
 	c.portUpdatePub = eventbus.Publish[router.PortUpdate](ec)
+	c.tsmpDiscoKeyAvailablePub = eventbus.Publish[NewDiscoKeyAvailable](ec)
 	eventbus.SubscribeFunc(ec, c.onPortMapChanged)
 	eventbus.SubscribeFunc(ec, c.onFilterUpdate)
 	eventbus.SubscribeFunc(ec, c.onNodeViewsUpdate)
@@ -2239,6 +2241,22 @@ func (c *Conn) handleDiscoMessage(msg []byte, src epAddr, shouldBeRelayHandshake
 		if debugDisco() {
 			c.logf("magicsock: disco: failed to open naclbox from %v (wrong rcpt?) via %s", sender, via)
 		}
+
+		// Crude version of finding the remote endpoint so we can send TSMPDiscoAdvert.
+		// If the message is over DERP and we have the peer in our map, send directly.
+		// If the message is not over DERP, see if we know the peer, and find the
+		// address to send the TSMP message to.
+		if pi, ok := c.peerMap.byEpAddr[src]; isDERP && ok {
+			c.maybeSendTSMPDiscoAdvert(pi.ep)
+		} else {
+			for _, pi := range c.peerMap.byNodeKey {
+				if pi.ep.disco.Load().key == sender {
+					c.maybeSendTSMPDiscoAdvert(pi.ep)
+					break
+				}
+			}
+		}
+
 		metricRecvDiscoBadKey.Add(1)
 		return
 	}
@@ -2645,6 +2663,8 @@ func (c *Conn) enqueueCallMeMaybe(derpAddr netip.AddrPort, de *endpoint) {
 		go c.ReSTUN("refresh-for-peering")
 		return
 	}
+
+	c.maybeSendTSMPDiscoAdvert(de)
 
 	eps := make([]netip.AddrPort, 0, len(c.lastEndpoints))
 	for _, ep := range c.lastEndpoints {
@@ -4305,4 +4325,17 @@ func (c *Conn) HandleDiscoKeyAdvertisement(node tailcfg.NodeView, update packet.
 	c.peerMap.upsertEndpoint(ep, oldDiscoKey)
 	c.logf("magicsock: updated disco key for peer %v to %v", nodeKey.ShortString(), discoKey.ShortString())
 	metricTSMPDiscoKeyAdvertisementApplied.Add(1)
+}
+
+type NewDiscoKeyAvailable struct {
+	EpAddr netip.Addr
+}
+
+func (c *Conn) maybeSendTSMPDiscoAdvert(de *endpoint) {
+	if de.lastTSMPDiscoAdvertisement == 0 {
+		de.lastTSMPDiscoAdvertisement = mono.Now()
+		c.tsmpDiscoKeyAvailablePub.Publish(NewDiscoKeyAvailable{
+			EpAddr: de.nodeAddr,
+		})
+	}
 }
