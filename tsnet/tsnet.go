@@ -52,6 +52,7 @@ import (
 	"tailscale.com/net/proxymux"
 	"tailscale.com/net/socks5"
 	"tailscale.com/net/tsdial"
+	"tailscale.com/tailcfg"
 	"tailscale.com/tsd"
 	"tailscale.com/types/bools"
 	"tailscale.com/types/logger"
@@ -1237,6 +1238,103 @@ func (s *Server) ListenFunnel(network, addr string, opts ...FunnelOption) (net.L
 		return nil, err
 	}
 	return tls.NewListener(ln, tlsConfig), nil
+}
+
+// TODO: doc
+// TODO: name?
+// TODO: can this mirror the format accepted by set-config?
+// For now, configures a single endpoint
+// Maybe this should be an interface, with implementations like ListenTCPService, etc.
+type ListenServiceConfig struct {
+	Port        uint16
+	PortHandler ipn.TCPPortHandler // TODO: what about UDP support in the future?
+
+	// TODO: could be HTTP-specific if this config becomes an interface
+	WebHandlers map[ipn.HostPort]*ipn.WebServerConfig
+
+	// TODO: maybe something like this for things like PROXY protocol support?
+	// L4Options
+}
+
+// TODO: do we actually need this?
+type ServiceOption interface {
+	serviceOption()
+}
+
+// TODO: doc
+// TODO: tailcfg.ServiceName?
+func (s *Server) ListenService(name string, port uint16) (net.Listener, error) {
+	if err := tailcfg.ServiceName(name).Validate(); err != nil {
+		return nil, err
+	}
+
+	// TODO:
+	// - get existing serve config
+	// - make changes and update
+	// - pipe to local TCP listener
+
+	// TODO:
+	// - try above with simple TCP listener first
+	// - handle Services with multiple ports defined
+	// - support web handlers
+	// - make sure extras like PROXY mode are supported
+	// - support TUN mode
+
+	ctx := context.Background()
+	_, err := s.Up(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	lc := s.localClient
+
+	// TODO: check for ACL tags
+
+	prefs, err := lc.GetPrefs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching node preferences: %w", err)
+	}
+	if !slices.Contains(prefs.AdvertiseServices, name) {
+		_, err = lc.EditPrefs(ctx, &ipn.MaskedPrefs{
+			AdvertiseServicesSet: true,
+			Prefs: ipn.Prefs{
+				AdvertiseServices: append(prefs.AdvertiseServices, name),
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("updating advertised Services: %w", err)
+		}
+	}
+
+	srvConfig, err := lc.GetServeConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching node serve config: %w", err)
+	}
+	if srvConfig == nil {
+		srvConfig = new(ipn.ServeConfig)
+	}
+
+	// Start listening on a TCP socket. We will direct the local client to
+	// forward connections to this listener.
+	ln, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		return nil, fmt.Errorf("starting local listener: %w", err)
+	}
+
+	// TODO:
+	// - Handle terminateTLS
+	// - Handle proxyProtocol
+	srvConfig.SetTCPForwarding(port, ln.Addr().String(), false, 0, name)
+
+	if err := lc.SetServeConfig(ctx, srvConfig); err != nil {
+		ln.Close()
+		return nil, err
+	}
+
+	// TODO: wrap returned listener such that Close stops advertising the
+	// Service (should update prefs, serve config, etc.)
+
+	return ln, nil
 }
 
 type listenOn string
