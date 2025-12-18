@@ -984,7 +984,6 @@ func (h *Handler) serveLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) servePrefs(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("<harry> servePrefs")
 	if !h.PermitRead {
 		http.Error(w, "prefs access denied", http.StatusForbidden)
 		return
@@ -992,7 +991,6 @@ func (h *Handler) servePrefs(w http.ResponseWriter, r *http.Request) {
 	var prefs ipn.PrefsView
 	switch r.Method {
 	case httpm.PATCH:
-		fmt.Println("<harry> servePrefs: PATCH")
 		if !h.PermitWrite {
 			http.Error(w, "prefs write access denied", http.StatusForbidden)
 			return

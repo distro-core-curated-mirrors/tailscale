@@ -1066,9 +1066,6 @@ func (ns *Impl) shouldProcessInbound(p *packet.Parsed, t *tstun.Wrapper) bool {
 	isLocal := ns.isLocalIP(dstIP)
 	isService := ns.isVIPServiceIP(dstIP)
 
-	fmt.Println("<harry> shouldProcessInbound: called for target", dstIP)
-	fmt.Println("<harry> shouldProcessInbound: isService:", isService)
-
 	// Handle TCP connection to the Tailscale IP(s) in some cases:
 	if ns.lb != nil && p.IPProto == ipproto.TCP && isLocal {
 		var peerAPIPort uint16
@@ -1098,7 +1095,6 @@ func (ns *Impl) shouldProcessInbound(p *packet.Parsed, t *tstun.Wrapper) bool {
 			// An assumption holds for this to work: when tun mode is on for a service,
 			// its tcp and web are not set. This is enforced in b.setServeConfigLocked.
 			if ns.lb.ShouldInterceptVIPServiceTCPPort(p.Dst) {
-				fmt.Println("<harry> shouldProcessInbound: intercepting packet for Service")
 				return true
 			}
 		}
@@ -1191,8 +1187,6 @@ func (ns *Impl) injectInbound(p *packet.Parsed, t *tstun.Wrapper, gro *gro.GRO) 
 	if ns.ctx.Err() != nil {
 		return filter.DropSilently, gro
 	}
-
-	fmt.Println("<harry> wgengine/netstack.injectInbound: for", p.Dst)
 
 	if !ns.shouldProcessInbound(p, t) {
 		// Let the host network stack (if any) deal with it.
