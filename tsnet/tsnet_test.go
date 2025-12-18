@@ -800,24 +800,8 @@ func TestListenService(t *testing.T) {
 		}
 	}()
 
-	// debugging
-	cNM := serviceClient.lb.NetMap()
-	if len(cNM.Peers) != 1 {
-		t.Fatal("more than one peer? got", len(cNM.Peers))
-	}
-	p := cNM.Peers[0]
-	fmt.Printf(
-		"serviceClient's view of host:\n\tallowed IPs: %v\n\tprimaryRoutes:%v\n",
-		p.AllowedIPs().AsSlice(), p.PrimaryRoutes().AsSlice())
-
-	// target := serviceName.WithoutPrefix() + ".tail-scale.ts.net:" + fmt.Sprint(servicePort)
-	target := serviceVIP + ":" + fmt.Sprint(servicePort) // TODO: can we dial the service FQDN? does that matter?
-	// conn, err := dialIngressConn(serviceClient, serviceHost, target)
-	conn, err := serviceClient.Dial(ctx, "tcp", target)
-	if err != nil {
-		t.Fatal("dial error:", err)
-	}
-	// conn := must.Get(serviceClient.Dial(ctx, "tcp", target))
+	target := fmt.Sprintf("%s:%d", serviceVIP, servicePort)
+	conn := must.Get(serviceClient.Dial(ctx, "tcp", target))
 	defer conn.Close()
 
 	msg := "hello, Service"
