@@ -764,6 +764,15 @@ func TestListenService(t *testing.T) {
 	const servicePort uint16 = 80
 	const serviceVIP = "100.55.66.77"
 
+	// The service client must accept routes advertised by other nodes (RouteAll
+	// is equivalent to --accept-routes).
+	must.Get(serviceClient.localClient.EditPrefs(ctx, &ipn.MaskedPrefs{
+		RouteAllSet: true,
+		Prefs: ipn.Prefs{
+			RouteAll: true,
+		},
+	}))
+
 	// TODO: explain, maybe shove in a helper
 	var serviceHostCaps map[tailcfg.ServiceName]views.Slice[netip.Addr]
 	mak.Set(&serviceHostCaps, serviceName, views.SliceOf([]netip.Addr{netip.MustParseAddr(serviceVIP)}))
