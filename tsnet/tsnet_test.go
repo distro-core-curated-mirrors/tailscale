@@ -13,6 +13,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -49,6 +50,8 @@ import (
 	"tailscale.com/tstest/integration/testcontrol"
 	"tailscale.com/types/key"
 	"tailscale.com/types/logger"
+	"tailscale.com/types/views"
+	"tailscale.com/util/mak"
 	"tailscale.com/util/must"
 )
 
@@ -738,6 +741,88 @@ func TestFunnel(t *testing.T) {
 	}
 	if string(body) != "hello" {
 		t.Errorf("unexpected body: %q", body)
+	}
+}
+
+func TestListenService(t *testing.T) {
+
+	// Overview:
+	// - start test control
+	// - start a node to act as Service host and a node to act as a peer client
+	// - configure relevant capabilities and routes for host node
+	// - start a Service listener from host
+	// - dial Service from peer client
+	// - try to have a conversation
+
+	ctx := t.Context()
+
+	controlURL, control := startControl(t)
+	serviceHost, _, _ := startServer(t, ctx, controlURL, "service-host")
+	serviceClient, _, _ := startServer(t, ctx, controlURL, "service-client")
+
+	const serviceName = tailcfg.ServiceName("svc:foo")
+	const servicePort uint16 = 80
+	const serviceVIP = "100.55.66.77"
+
+	// TODO: explain, maybe shove in a helper
+	var serviceHostCaps map[tailcfg.ServiceName]views.Slice[netip.Addr]
+	mak.Set(&serviceHostCaps, serviceName, views.SliceOf([]netip.Addr{netip.MustParseAddr(serviceVIP)}))
+	j := must.Get(json.Marshal(serviceHostCaps))
+	cm := serviceHost.lb.NetMap().SelfNode.CapMap().AsMap()
+	mak.Set(&cm, tailcfg.NodeAttrServiceHost, []tailcfg.RawMessage{tailcfg.RawMessage(j)})
+	control.SetNodeCapMap(serviceHost.lb.NodeKey(), cm)
+	control.SetSubnetRoutes(serviceHost.lb.NodeKey(), []netip.Prefix{
+		netip.MustParsePrefix(serviceVIP + `/32`),
+	})
+
+	ln := must.Get(serviceHost.ListenService(serviceName.String(), servicePort))
+	defer ln.Close()
+
+	// Accept the first connection on ln and echo back what we receive.
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			t.Error("accept error:", err)
+			return
+		}
+		defer conn.Close()
+		if _, err := io.Copy(conn, conn); err != nil {
+			t.Error("copy error:", err)
+		}
+	}()
+
+	// debugging
+	cNM := serviceClient.lb.NetMap()
+	if len(cNM.Peers) != 1 {
+		t.Fatal("more than one peer? got", len(cNM.Peers))
+	}
+	p := cNM.Peers[0]
+	fmt.Printf(
+		"serviceClient's view of host:\n\tallowed IPs: %v\n\tprimaryRoutes:%v\n",
+		p.AllowedIPs().AsSlice(), p.PrimaryRoutes().AsSlice())
+
+	// target := serviceName.WithoutPrefix() + ".tail-scale.ts.net:" + fmt.Sprint(servicePort)
+	target := serviceVIP + ":" + fmt.Sprint(servicePort) // TODO: can we dial the service FQDN? does that matter?
+	// conn, err := dialIngressConn(serviceClient, serviceHost, target)
+	conn, err := serviceClient.Dial(ctx, "tcp", target)
+	if err != nil {
+		t.Fatal("dial error:", err)
+	}
+	// conn := must.Get(serviceClient.Dial(ctx, "tcp", target))
+	defer conn.Close()
+
+	msg := "hello, Service"
+	buf := make([]byte, 1024)
+	if _, err := conn.Write([]byte(msg)); err != nil {
+		t.Fatal("write failed:", err)
+	}
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatal("read failed:", err)
+	}
+	got := string(buf[:n])
+	if got != msg {
+		t.Fatalf("unexpected response:\n\twant: %s\n\tgot: %s", msg, got)
 	}
 }
 

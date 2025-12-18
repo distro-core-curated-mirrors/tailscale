@@ -27,6 +27,8 @@ var (
 	port    = flag.Uint("port", 0, "the port to listen on")
 )
 
+// TODO: this worked several times, then my host got stuck in 'Partially configured: has-config, config-valid'
+
 func main() {
 	flag.Parse()
 	if *svcName == "" {
