@@ -1241,37 +1241,42 @@ func (s *Server) ListenFunnel(network, addr string, opts ...FunnelOption) (net.L
 }
 
 // TODO: doc
-// TODO: name?
-// TODO: can this mirror the format accepted by set-config?
-// For now, configures a single endpoint
-// Maybe this should be an interface, with implementations like ListenTCPService, etc.
-type ListenServiceConfig struct {
-	Port        uint16
-	PortHandler ipn.TCPPortHandler // TODO: what about UDP support in the future?
-
-	// TODO: could be HTTP-specific if this config becomes an interface
-	WebHandlers map[ipn.HostPort]*ipn.WebServerConfig
-
-	// TODO: maybe something like this for things like PROXY protocol support?
-	// L4Options
-}
-
-// TODO: do we actually need this?
 type ServiceOption interface {
 	serviceOption()
 }
 
+type serviceOptionTerminateTLS struct{}
+
+func (serviceOptionTerminateTLS) serviceOption() {}
+
+// TODO: doc
+func ServiceOptionTerminateTLS() ServiceOption {
+	return serviceOptionTerminateTLS{}
+}
+
+type serviceOptionPROXYProtocol struct {
+	version int
+}
+
+func (serviceOptionPROXYProtocol) serviceOption() {}
+
+// TODO: doc
+func ServiceOptionPROXYProtocol(version int) ServiceOption {
+	return serviceOptionPROXYProtocol{version}
+}
+
+// ErrUntaggedServiceHost is returned by ListenService when run on a node
+// without any ACL tags. A node must use a tag-based identity to act as a
+// Service host. For more information, see:
+// https://tailscale.com/kb/1552/tailscale-services#prerequisites
+var ErrUntaggedServiceHost = errors.New("service hosts must be tagged nodes")
+
 // TODO: doc
 // TODO: tailcfg.ServiceName?
-func (s *Server) ListenService(name string, port uint16) (net.Listener, error) {
+func (s *Server) ListenService(name string, port uint16, opts ...ServiceOption) (net.Listener, error) {
 	if err := tailcfg.ServiceName(name).Validate(); err != nil {
 		return nil, err
 	}
-
-	// TODO:
-	// - get existing serve config
-	// - make changes and update
-	// - pipe to local TCP listener
 
 	// TODO:
 	// - try above with simple TCP listener first
@@ -1279,6 +1284,20 @@ func (s *Server) ListenService(name string, port uint16) (net.Listener, error) {
 	// - support web handlers
 	// - make sure extras like PROXY mode are supported
 	// - support TUN mode
+
+	// Process options.
+	terminateTLS := false
+	proxyProtocol := 0
+	for _, o := range opts {
+		switch opt := o.(type) {
+		case serviceOptionTerminateTLS:
+			terminateTLS = true
+		case serviceOptionPROXYProtocol:
+			proxyProtocol = opt.version
+		default:
+			return nil, fmt.Errorf("unknown opts FunnelOption type %T", o)
+		}
+	}
 
 	ctx := context.Background()
 	_, err := s.Up(ctx)
@@ -1288,7 +1307,13 @@ func (s *Server) ListenService(name string, port uint16) (net.Listener, error) {
 
 	lc := s.localClient
 
-	// TODO: check for ACL tags
+	st, err := lc.StatusWithoutPeers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching ACL tags: %w", err)
+	}
+	if st.Self.Tags == nil || st.Self.Tags.Len() == 0 {
+		return nil, ErrUntaggedServiceHost
+	}
 
 	prefs, err := lc.GetPrefs(ctx)
 	if err != nil {
@@ -1314,17 +1339,13 @@ func (s *Server) ListenService(name string, port uint16) (net.Listener, error) {
 		srvConfig = new(ipn.ServeConfig)
 	}
 
-	// Start listening on a TCP socket. We will direct the local client to
-	// forward connections to this listener.
+	// Start listening on a TCP socket.
 	ln, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
 		return nil, fmt.Errorf("starting local listener: %w", err)
 	}
-
-	// TODO:
-	// - Handle terminateTLS
-	// - Handle proxyProtocol
-	srvConfig.SetTCPForwarding(port, ln.Addr().String(), false, 0, name)
+	// Forward all connections from service-hostname:port to our socket.
+	srvConfig.SetTCPForwarding(port, ln.Addr().String(), terminateTLS, proxyProtocol, name)
 
 	if err := lc.SetServeConfig(ctx, srvConfig); err != nil {
 		ln.Close()

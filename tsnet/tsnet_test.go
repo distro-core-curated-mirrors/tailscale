@@ -784,6 +784,10 @@ func TestListenService(t *testing.T) {
 		netip.MustParsePrefix(serviceVIP + `/32`),
 	})
 
+	serviceHostNode := control.Node(serviceHost.lb.NodeKey())
+	serviceHostNode.Tags = append(serviceHostNode.Tags, "some-tag")
+	control.UpdateNode(serviceHostNode)
+
 	ln := must.Get(serviceHost.ListenService(serviceName.String(), servicePort))
 	defer ln.Close()
 
