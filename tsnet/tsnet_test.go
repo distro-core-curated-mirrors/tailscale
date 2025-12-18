@@ -745,81 +745,110 @@ func TestFunnel(t *testing.T) {
 }
 
 func TestListenService(t *testing.T) {
-
-	// Overview:
-	// - start test control
-	// - start a node to act as Service host and a node to act as a peer client
-	// - configure relevant capabilities and routes for host node
-	// - start a Service listener from host
-	// - dial Service from peer client
-	// - try to have a conversation
-
-	ctx := t.Context()
-
-	controlURL, control := startControl(t)
-	serviceHost, _, _ := startServer(t, ctx, controlURL, "service-host")
-	serviceClient, _, _ := startServer(t, ctx, controlURL, "service-client")
-
-	const serviceName = tailcfg.ServiceName("svc:foo")
-	const servicePort uint16 = 80
-	const serviceVIP = "100.55.66.77"
-
-	// The service client must accept routes advertised by other nodes (RouteAll
-	// is equivalent to --accept-routes).
-	must.Get(serviceClient.localClient.EditPrefs(ctx, &ipn.MaskedPrefs{
-		RouteAllSet: true,
-		Prefs: ipn.Prefs{
-			RouteAll: true,
+	tests := []struct {
+		name string
+		opts ServiceOption
+	}{
+		{
+			name: "basic_TCP_service",
 		},
-	}))
-
-	// TODO: explain, maybe shove in a helper
-	var serviceHostCaps map[tailcfg.ServiceName]views.Slice[netip.Addr]
-	mak.Set(&serviceHostCaps, serviceName, views.SliceOf([]netip.Addr{netip.MustParseAddr(serviceVIP)}))
-	j := must.Get(json.Marshal(serviceHostCaps))
-	cm := serviceHost.lb.NetMap().SelfNode.CapMap().AsMap()
-	mak.Set(&cm, tailcfg.NodeAttrServiceHost, []tailcfg.RawMessage{tailcfg.RawMessage(j)})
-	control.SetNodeCapMap(serviceHost.lb.NodeKey(), cm)
-	control.SetSubnetRoutes(serviceHost.lb.NodeKey(), []netip.Prefix{
-		netip.MustParsePrefix(serviceVIP + `/32`),
-	})
-
-	serviceHostNode := control.Node(serviceHost.lb.NodeKey())
-	serviceHostNode.Tags = append(serviceHostNode.Tags, "some-tag")
-	control.UpdateNode(serviceHostNode)
-
-	ln := must.Get(serviceHost.ListenService(serviceName.String(), servicePort))
-	defer ln.Close()
-
-	// Accept the first connection on ln and echo back what we receive.
-	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			t.Error("accept error:", err)
-			return
-		}
-		defer conn.Close()
-		if _, err := io.Copy(conn, conn); err != nil {
-			t.Error("copy error:", err)
-		}
-	}()
-
-	target := fmt.Sprintf("%s:%d", serviceVIP, servicePort)
-	conn := must.Get(serviceClient.Dial(ctx, "tcp", target))
-	defer conn.Close()
-
-	msg := "hello, Service"
-	buf := make([]byte, 1024)
-	if _, err := conn.Write([]byte(msg)); err != nil {
-		t.Fatal("write failed:", err)
+		// TODO:
+		// Success cases:
+		// - TLS-terminated-TCP
+		// - Service with multiple ports
+		// - TUN Service
+		// - web handlers
+		// Error cases:
+		// - Untagged node
 	}
-	n, err := conn.Read(buf)
-	if err != nil {
-		t.Fatal("read failed:", err)
-	}
-	got := string(buf[:n])
-	if got != msg {
-		t.Fatalf("unexpected response:\n\twant: %s\n\tgot: %s", msg, got)
+
+	for _, tt := range tests {
+		// Overview:
+		// - start test control
+		// - start 2 tsnet nodes:
+		//     one to act as Service host and a second to act as a peer client
+		// - configure necessary state on control mock
+		// - start a Service listener from host
+		// - dial Service from peer client
+		// - try to have a conversation
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+
+			controlURL, control := startControl(t)
+			serviceHost, _, _ := startServer(t, ctx, controlURL, "service-host")
+			serviceClient, _, _ := startServer(t, ctx, controlURL, "service-client")
+
+			const serviceName = tailcfg.ServiceName("svc:foo")
+			const servicePort uint16 = 80
+			const serviceVIP = "100.11.22.33"
+
+			// == Set up necessary state in our mock ==
+
+			// The Service host must have the 'service-host' capability, which
+			// is a mapping from the Service name to the Service VIP.
+			var serviceHostCaps map[tailcfg.ServiceName]views.Slice[netip.Addr]
+			mak.Set(&serviceHostCaps, serviceName, views.SliceOf([]netip.Addr{netip.MustParseAddr(serviceVIP)}))
+			j := must.Get(json.Marshal(serviceHostCaps))
+			cm := serviceHost.lb.NetMap().SelfNode.CapMap().AsMap()
+			mak.Set(&cm, tailcfg.NodeAttrServiceHost, []tailcfg.RawMessage{tailcfg.RawMessage(j)})
+			control.SetNodeCapMap(serviceHost.lb.NodeKey(), cm)
+
+			// The Service host must be allowed to advertise the Service VIP.
+			control.SetSubnetRoutes(serviceHost.lb.NodeKey(), []netip.Prefix{
+				netip.MustParsePrefix(serviceVIP + `/32`),
+			})
+
+			// The Service host must be a tagged node (any tag will do).
+			serviceHostNode := control.Node(serviceHost.lb.NodeKey())
+			serviceHostNode.Tags = append(serviceHostNode.Tags, "some-tag")
+			control.UpdateNode(serviceHostNode)
+
+			// The service client must accept routes advertised by other nodes
+			// (RouteAll is equivalent to --accept-routes).
+			must.Get(serviceClient.localClient.EditPrefs(ctx, &ipn.MaskedPrefs{
+				RouteAllSet: true,
+				Prefs: ipn.Prefs{
+					RouteAll: true,
+				},
+			}))
+
+			// == Done setting up mock state ==
+
+			// Start a Service listener.
+			ln := must.Get(serviceHost.ListenService(serviceName.String(), servicePort))
+			defer ln.Close()
+
+			// Accept the first connection on ln and echo back what we receive.
+			go func() {
+				conn, err := ln.Accept()
+				if err != nil {
+					t.Error("accept error:", err)
+					return
+				}
+				defer conn.Close()
+				if _, err := io.Copy(conn, conn); err != nil {
+					t.Error("copy error:", err)
+				}
+			}()
+
+			target := fmt.Sprintf("%s:%d", serviceVIP, servicePort)
+			conn := must.Get(serviceClient.Dial(ctx, "tcp", target))
+			defer conn.Close()
+
+			msg := "hello, Service"
+			buf := make([]byte, 1024)
+			if _, err := conn.Write([]byte(msg)); err != nil {
+				t.Fatal("write failed:", err)
+			}
+			n, err := conn.Read(buf)
+			if err != nil {
+				t.Fatal("read failed:", err)
+			}
+			got := string(buf[:n])
+			if got != msg {
+				t.Fatalf("unexpected response:\n\twant: %s\n\tgot: %s", msg, got)
+			}
+		})
 	}
 }
 
