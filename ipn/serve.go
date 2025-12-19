@@ -17,6 +17,7 @@ import (
 
 	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tailcfg"
+	"tailscale.com/types/bools"
 	"tailscale.com/types/ipproto"
 	"tailscale.com/util/dnsname"
 	"tailscale.com/util/mak"
@@ -433,16 +434,6 @@ func (sc *ServeConfig) SetTCPForwarding(port uint16, fwdAddr string, terminateTL
 	if sc == nil {
 		sc = new(ServeConfig)
 	}
-	tcpPortHandler := &sc.TCP
-	if svcName := tailcfg.AsServiceName(host); svcName != "" {
-		svcConfig, ok := sc.Services[svcName]
-		if !ok {
-			svcConfig = new(ServiceConfig)
-			mak.Set(&sc.Services, svcName, svcConfig)
-		}
-		tcpPortHandler = &svcConfig.TCP
-	}
-
 	handler := &TCPPortHandler{
 		TCPForward:    fwdAddr,
 		ProxyProtocol: proxyProtocol, // can be 0
@@ -450,7 +441,28 @@ func (sc *ServeConfig) SetTCPForwarding(port uint16, fwdAddr string, terminateTL
 	if terminateTLS {
 		handler.TerminateTLS = host
 	}
-	mak.Set(tcpPortHandler, port, handler)
+	mak.Set(&sc.TCP, port, handler)
+}
+
+// SetTCPForwardingForService sets the fwdAddr (IP:port form) to which to
+// forward connections from the given port on the service. If terminateTLS
+// is true, TLS connections are terminated, with only the FQDN that corresponds
+// to the given service being permitted, before passing them to the fwdAddr.
+func (sc *ServeConfig) SetTCPForwardingForService(port uint16, fwdAddr string, svcName tailcfg.ServiceName, terminateTLS bool, proxyProtocol int, magicDNSSuffix string) {
+	if sc == nil {
+		sc = new(ServeConfig)
+	}
+	svcConfig, ok := sc.Services[svcName]
+	if !ok {
+		svcConfig = new(ServiceConfig)
+		mak.Set(&sc.Services, svcName, svcConfig)
+	}
+	fqdn := svcName.WithoutPrefix() + "." + magicDNSSuffix
+	mak.Set(&svcConfig.TCP, port, &TCPPortHandler{
+		TCPForward:    fwdAddr,
+		ProxyProtocol: proxyProtocol,
+		TerminateTLS:  bools.IfElse(terminateTLS, fqdn, ""),
+	})
 }
 
 // SetFunnel sets the sc.AllowFunnel value for the given host and port.
