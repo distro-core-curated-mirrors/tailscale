@@ -1320,6 +1320,7 @@ func (s *Server) ListenService(name string, port uint16, opts ...ServiceOption) 
 		return nil, fmt.Errorf("fetching node preferences: %w", err)
 	}
 	if !slices.Contains(prefs.AdvertiseServices, name) {
+		// TODO: do we need to undo this edit on error?
 		_, err = lc.EditPrefs(ctx, &ipn.MaskedPrefs{
 			AdvertiseServicesSet: true,
 			Prefs: ipn.Prefs{
@@ -1345,7 +1346,9 @@ func (s *Server) ListenService(name string, port uint16, opts ...ServiceOption) 
 		return nil, fmt.Errorf("starting local listener: %w", err)
 	}
 	// Forward all connections from service-hostname:port to our socket.
-	srvConfig.SetTCPForwarding(port, ln.Addr().String(), terminateTLS, proxyProtocol, name)
+	srvConfig.SetTCPForwardingForService( // TODO: tangent, but can we reduce the number of args here?
+		port, ln.Addr().String(), tailcfg.ServiceName(name),
+		terminateTLS, proxyProtocol, st.CurrentTailnet.MagicDNSSuffix)
 
 	if err := lc.SetServeConfig(ctx, srvConfig); err != nil {
 		ln.Close()
