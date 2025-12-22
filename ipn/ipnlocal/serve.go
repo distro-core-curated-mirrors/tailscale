@@ -419,20 +419,16 @@ func (b *LocalBackend) HandleIngressTCPConn(ingressPeer tailcfg.NodeView, target
 	sc := b.serveConfig
 	b.mu.Unlock()
 
-	fmt.Println("<harry> handleIngress: target:", target)
-
 	// TODO(maisem,bradfitz): make this not alloc for every conn.
 	logf := logger.WithPrefix(b.logf, "handleIngress: ")
 
 	if !sc.Valid() {
-		fmt.Println("<harry> handleIngress: no serveConfig")
 		logf("got ingress conn w/o serveConfig; rejecting")
 		sendRST()
 		return
 	}
 
 	if !sc.HasFunnelForTarget(target) {
-		fmt.Println("<harry> handleIngress: no funnel config")
 		logf("got ingress conn for unconfigured %q; rejecting", target)
 		sendRST()
 		return
@@ -440,14 +436,12 @@ func (b *LocalBackend) HandleIngressTCPConn(ingressPeer tailcfg.NodeView, target
 
 	host, port, err := net.SplitHostPort(string(target))
 	if err != nil {
-		fmt.Println("<harry> handleIngress: bag target 1")
 		logf("got ingress conn for bad target %q; rejecting", target)
 		sendRST()
 		return
 	}
 	port16, err := strconv.ParseUint(port, 10, 16)
 	if err != nil {
-		fmt.Println("<harry> handleIngress: bad target 2")
 		logf("got ingress conn for bad target %q; rejecting", target)
 		sendRST()
 		return
@@ -458,11 +452,9 @@ func (b *LocalBackend) HandleIngressTCPConn(ingressPeer tailcfg.NodeView, target
 		if handler != nil {
 			c, ok := getConnOrReset()
 			if !ok {
-				fmt.Println("<harry> handleIngress: getTCPHandlerForFunnelFlow: getConn error")
 				logf("getConn didn't complete from %v to port %v", srcAddr, dport)
 				return
 			}
-			fmt.Println("<harry> handleIngress: getTCPHandlerForFunnelFlow: handling")
 			handler(c)
 			return
 		}
@@ -472,18 +464,15 @@ func (b *LocalBackend) HandleIngressTCPConn(ingressPeer tailcfg.NodeView, target
 		IngressPeer: ingressPeer,
 	})
 	if handler == nil {
-		fmt.Println("<harry> handleIngress: no TCP handler for serve")
 		logf("[unexpected] no matching ingress serve handler for %v to port %v", srcAddr, dport)
 		sendRST()
 		return
 	}
 	c, ok := getConnOrReset()
 	if !ok {
-		fmt.Println("<harry> handleIngress: getConnOrReset err")
 		logf("getConn didn't complete from %v to port %v", srcAddr, dport)
 		return
 	}
-	fmt.Println("<harry> handleIngress: handling")
 	handler(c)
 }
 
@@ -1390,8 +1379,6 @@ func handleServeIngress(ph PeerAPIHandler, w http.ResponseWriter, r *http.Reques
 	h := ph.(*peerAPIHandler)
 	metricIngressCalls.Add(1)
 
-	fmt.Println("<harry> handleServeIngress called")
-
 	// http.Errors only useful if hitting endpoint manually
 	// otherwise rely on log lines when debugging ingress connections
 	// as connection is hijacked for bidi and is encrypted tls
@@ -1422,14 +1409,11 @@ func handleServeIngress(ph PeerAPIHandler, w http.ResponseWriter, r *http.Reques
 		return
 	}
 	target := ipn.HostPort(r.Header.Get("Tailscale-Ingress-Target"))
-	fmt.Println("<harry> handleServeIngress: target:", target)
 	if target == "" {
-		fmt.Println("<harry> handleServeIngress: target not set")
 		bad("Tailscale-Ingress-Target header not set")
 		return
 	}
 	if _, _, err := net.SplitHostPort(string(target)); err != nil {
-		fmt.Println("<harry> handleServeIngress: target invalid")
 		bad("Tailscale-Ingress-Target header invalid; want host:port")
 		return
 	}
@@ -1568,7 +1552,6 @@ func (b *LocalBackend) setVIPServicesTCPPortsInterceptedLocked(svcPorts map[tail
 		b.shouldInterceptVIPServicesTCPPortAtomic.Store(func(netip.AddrPort) bool { return false })
 		return
 	}
-	fmt.Println("<harry> setVIPServicesTCPPortsInterceptedLocked: hostname:", b.currentNode().Self().Hostinfo().Hostname())
 	nm := b.currentNode().NetMap()
 	if nm == nil {
 		b.logf("can't set intercept function for Service TCP Ports, netMap is nil")
@@ -1576,7 +1559,6 @@ func (b *LocalBackend) setVIPServicesTCPPortsInterceptedLocked(svcPorts map[tail
 	}
 	vipServiceIPMap := nm.GetVIPServiceIPMap()
 	if len(vipServiceIPMap) == 0 {
-		fmt.Println("<harry> setVIPServicesTCPPortsInterceptedLocked: no VIP service IP map, not setting intercepted ports")
 		// No approved VIP Services
 		return
 	}
@@ -1586,10 +1568,8 @@ func (b *LocalBackend) setVIPServicesTCPPortsInterceptedLocked(svcPorts map[tail
 	for svcName, ports := range svcPorts {
 		addrs, ok := vipServiceIPMap[svcName]
 		if !ok {
-			fmt.Println("<harry> setVIPServicesTCPPortsInterceptedLocked: no VIP service map entry for", svcName)
 			continue
 		}
-		fmt.Println("<harry> setVIPServicesTCPPortsInterceptedLocked: generating intercept function for", svcName)
 		interceptFn := generateInterceptTCPPortFunc(ports)
 		for _, addr := range addrs {
 			svcAddrPorts[addr] = interceptFn

@@ -6895,16 +6895,13 @@ func (b *LocalBackend) ShouldInterceptTCPPort(port uint16) bool {
 // ShouldInterceptVIPServiceTCPPort reports whether the given TCP port number
 // to a VIP service should be intercepted by Tailscaled and handled in-process.
 func (b *LocalBackend) ShouldInterceptVIPServiceTCPPort(ap netip.AddrPort) bool {
-	fmt.Println("<harry> ShouldInterceptVIPServiceTCPPort: called for", ap)
 	if !buildfeatures.HasServe {
 		return false
 	}
 	f := b.shouldInterceptVIPServicesTCPPortAtomic.Load()
 	if f == nil {
-		fmt.Println("<harry> ShouldInterceptVIPServiceTCPPort: no intercepts configured, returning false")
 		return false
 	}
-	fmt.Println("<harry> ShouldInterceptVIPServiceTCPPort: returning", f(ap))
 	return f(ap)
 }
 
