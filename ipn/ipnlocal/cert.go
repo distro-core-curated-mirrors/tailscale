@@ -45,6 +45,7 @@ import (
 	"tailscale.com/tailcfg"
 	"tailscale.com/tempfork/acme"
 	"tailscale.com/types/logger"
+	"tailscale.com/util/set"
 	"tailscale.com/util/testenv"
 	"tailscale.com/version"
 	"tailscale.com/version/distro"
@@ -107,6 +108,15 @@ func (b *LocalBackend) GetCertPEM(ctx context.Context, domain string) (*TLSCertK
 // If a cert is expired, or expires sooner than minValidity, it will be renewed
 // synchronously. Otherwise it will be renewed asynchronously.
 func (b *LocalBackend) GetCertPEMWithValidity(ctx context.Context, domain string, minValidity time.Duration) (*TLSCertKeyPair, error) {
+	b.mu.Lock()
+	getCertForTest := b.getCertForTest
+	b.mu.Unlock()
+
+	if getCertForTest != nil {
+		testenv.AssertInTest()
+		return getCertForTest(domain)
+	}
+
 	if !validLookingCertDomain(domain) {
 		return nil, errors.New("invalid domain")
 	}
@@ -297,6 +307,41 @@ func (b *LocalBackend) getCertStore() (certStore, error) {
 		panic("use of test hook outside of tests")
 	}
 	return certFileStore{dir: dir, testRoots: testX509Roots}, nil
+}
+
+// SetCertsForTest configures the TLS certificates used by this local backend.
+// This should only be used in testing and can be used to skip the usual ACME
+// certificate registration.
+//
+// Certificates will be served based on the subject name or subject alternative
+// names (SANs) in the certificate. If this backend should serve certificates
+// for hostnames like foo.tail-scale.ts.net or test-service.tail-scale.ts.net,
+// then those names need to appear in the subject name or SAN.
+func (b *LocalBackend) SetCertsForTest(certs ...TLSCertKeyPair) {
+	testenv.AssertInTest()
+	m := map[string]TLSCertKeyPair{}
+	for _, c := range certs {
+		cert, err := tls.X509KeyPair(c.CertPEM, c.KeyPEM)
+		if err != nil {
+			panic(fmt.Sprintf("parse error: %v", err))
+		}
+		names := set.Of(append(cert.Leaf.DNSNames, cert.Leaf.Subject.CommonName)...)
+		for _, name := range names.Slice() {
+			if _, ok := m[name]; ok {
+				panic(fmt.Sprintf("duplicate subject name %v", name))
+			}
+			m[name] = c
+		}
+	}
+	b.mu.Lock()
+	b.getCertForTest = func(domain string) (*TLSCertKeyPair, error) {
+		c, ok := m[domain]
+		if !ok {
+			return nil, errors.New("cert not found")
+		}
+		return &c, nil
+	}
+	b.mu.Unlock()
 }
 
 // certFileStore implements certStore by storing the cert & key files in the named directory.
