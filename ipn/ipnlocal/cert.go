@@ -314,9 +314,9 @@ func (b *LocalBackend) getCertStore() (certStore, error) {
 // certificate registration.
 //
 // Certificates will be served based on the subject name or subject alternative
-// names (SANs) in the certificate. If this backend should serve certificates
+// names (SANs) in the certificates. If this backend should serve certificates
 // for hostnames like foo.tail-scale.ts.net or test-service.tail-scale.ts.net,
-// then those names need to appear in the subject name or SAN.
+// then those names need to appear as a subject name or SAN.
 func (b *LocalBackend) SetCertsForTest(certs ...TLSCertKeyPair) {
 	testenv.AssertInTest()
 	m := map[string]TLSCertKeyPair{}

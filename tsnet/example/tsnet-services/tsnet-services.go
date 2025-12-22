@@ -50,6 +50,7 @@ func main() {
 	}
 	defer ln.Close()
 
+	// TODO: provide access to FQDN from listener and use that instead
 	fmt.Printf("Listening on https://%v\n", tailcfg.AsServiceName(*svcName).WithoutPrefix())
 
 	err = http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

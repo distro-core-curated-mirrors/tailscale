@@ -838,6 +838,9 @@ func (s *Server) serveRegister(w http.ResponseWriter, r *http.Request, mkey key.
 			CapMap:            capMap,
 			Capabilities:      slices.Collect(maps.Keys(capMap)),
 		}
+		if s.MagicDNSDomain != "" {
+			node.Name = node.Name + "." + s.MagicDNSDomain
+		}
 		s.nodes[nk] = node
 	}
 	requireAuth := s.RequireAuth
@@ -1261,9 +1264,7 @@ func (s *Server) MapResponse(req *tailcfg.MapRequest) (res *tailcfg.MapResponse,
 	dns := s.DNSConfig
 	if dns != nil && s.MagicDNSDomain != "" {
 		dns = dns.Clone()
-		dns.CertDomains = []string{
-			node.Hostinfo.Hostname() + "." + s.MagicDNSDomain,
-		}
+		dns.CertDomains = append(dns.CertDomains, node.Hostinfo.Hostname()+"."+s.MagicDNSDomain)
 	}
 
 	res = &tailcfg.MapResponse{

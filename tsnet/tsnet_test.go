@@ -14,6 +14,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
@@ -37,10 +38,12 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"golang.org/x/net/proxy"
+
 	"tailscale.com/client/local"
 	"tailscale.com/cmd/testwrapper/flakytest"
 	"tailscale.com/internal/client/tailscale"
 	"tailscale.com/ipn"
+	"tailscale.com/ipn/ipnlocal"
 	"tailscale.com/ipn/store/mem"
 	"tailscale.com/net/netns"
 	"tailscale.com/tailcfg"
@@ -747,10 +750,14 @@ func TestFunnel(t *testing.T) {
 func TestListenService(t *testing.T) {
 	tests := []struct {
 		name string
-		opts ServiceOption
+		opts []ServiceOption
 	}{
 		{
 			name: "basic_TCP_service",
+		},
+		{
+			name: "TLS_terminated_TCP",
+			opts: []ServiceOption{ServiceOptionTerminateTLS()},
 		},
 		// TODO:
 		// Success cases:
@@ -771,6 +778,9 @@ func TestListenService(t *testing.T) {
 		// - start a Service listener from host
 		// - dial Service from peer client
 		// - try to have a conversation
+		//
+		// This ends up also testing the Service forwarding logic in
+		// LocalBackend, but that's useful too.
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
 
@@ -779,8 +789,10 @@ func TestListenService(t *testing.T) {
 			serviceClient, _, _ := startServer(t, ctx, controlURL, "service-client")
 
 			const serviceName = tailcfg.ServiceName("svc:foo")
-			const servicePort uint16 = 80
+			const servicePort uint16 = 99
 			const serviceVIP = "100.11.22.33"
+
+			serviceFQDN := serviceName.WithoutPrefix() + "." + control.MagicDNSDomain
 
 			// == Set up necessary state in our mock ==
 
@@ -803,6 +815,23 @@ func TestListenService(t *testing.T) {
 			serviceHostNode.Tags = append(serviceHostNode.Tags, "some-tag")
 			control.UpdateNode(serviceHostNode)
 
+			// Configure a certificate for the Service domain (in production,
+			// the local backend would use an ACME client to obtain a cert).
+			// This is only used when serving over TLS.
+			cert := must.Get(testCertRoot.getCert(&tls.ClientHelloInfo{
+				ServerName: serviceFQDN,
+			}))
+			serviceHost.lb.SetCertsForTest(ipnlocal.TLSCertKeyPair{
+				CertPEM: pem.EncodeToMemory(&pem.Block{
+					Type:  "CERTIFICATE",
+					Bytes: cert.Certificate[0],
+				}),
+				KeyPEM: pem.EncodeToMemory(&pem.Block{
+					Type:  "PRIVATE KEY",
+					Bytes: must.Get(x509.MarshalPKCS8PrivateKey(cert.PrivateKey)),
+				}),
+			})
+
 			// The service client must accept routes advertised by other nodes
 			// (RouteAll is equivalent to --accept-routes).
 			must.Get(serviceClient.localClient.EditPrefs(ctx, &ipn.MaskedPrefs{
@@ -815,7 +844,7 @@ func TestListenService(t *testing.T) {
 			// == Done setting up mock state ==
 
 			// Start a Service listener.
-			ln := must.Get(serviceHost.ListenService(serviceName.String(), servicePort))
+			ln := must.Get(serviceHost.ListenService(serviceName.String(), servicePort, tt.opts...))
 			defer ln.Close()
 
 			// Accept the first connection on ln and echo back what we receive.
@@ -834,6 +863,15 @@ func TestListenService(t *testing.T) {
 			target := fmt.Sprintf("%s:%d", serviceVIP, servicePort)
 			conn := must.Get(serviceClient.Dial(ctx, "tcp", target))
 			defer conn.Close()
+
+			for _, opt := range tt.opts {
+				if _, ok := opt.(serviceOptionTerminateTLS); ok {
+					conn = tls.Client(conn, &tls.Config{
+						ServerName: serviceFQDN,
+						RootCAs:    testCertRoot.Pool(),
+					})
+				}
+			}
 
 			msg := "hello, Service"
 			buf := make([]byte, 1024)
