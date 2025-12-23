@@ -30,6 +30,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -138,6 +139,9 @@ func startControl(t *testing.T) (controlURL string, control *testcontrol.Server)
 }
 
 type testCertIssuer struct {
+	mu    sync.Mutex
+	certs map[string]ipnlocal.TLSCertKeyPair // keyed by hostname
+
 	root    *x509.Certificate
 	rootKey *ecdsa.PrivateKey
 }
@@ -170,33 +174,48 @@ func newCertIssuer() *testCertIssuer {
 	return &testCertIssuer{
 		root:    rootCA,
 		rootKey: rootKey,
+		certs:   map[string]ipnlocal.TLSCertKeyPair{},
 	}
 }
 
-func (tci *testCertIssuer) makeCert(domain string) (certPEM, keyPEM []byte, err error) {
+func (tci *testCertIssuer) getCert(hostname string) (*ipnlocal.TLSCertKeyPair, error) {
+	tci.mu.Lock()
+	defer tci.mu.Unlock()
+	cert, ok := tci.certs[hostname]
+	if ok {
+		return &cert, nil
+	}
+
 	certPrivKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	certTmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		DNSNames:     []string{domain},
+		DNSNames:     []string{hostname},
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().Add(time.Hour),
 	}
 	certDER, err := x509.CreateCertificate(rand.Reader, certTmpl, tci.root, &certPrivKey.PublicKey, tci.rootKey)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	certPEM = pem.EncodeToMemory(&pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: certDER,
-	})
-	keyPEM = pem.EncodeToMemory(&pem.Block{
-		Type:  "PRIVATE KEY",
-		Bytes: must.Get(x509.MarshalPKCS8PrivateKey(certPrivKey)),
-	})
-	return certPEM, keyPEM, nil
+	keyDER, err := x509.MarshalPKCS8PrivateKey(certPrivKey)
+	if err != nil {
+		return nil, err
+	}
+	cert = ipnlocal.TLSCertKeyPair{
+		CertPEM: pem.EncodeToMemory(&pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: certDER,
+		}),
+		KeyPEM: pem.EncodeToMemory(&pem.Block{
+			Type:  "PRIVATE KEY",
+			Bytes: keyDER,
+		}),
+	}
+	tci.certs[hostname] = cert
+	return &cert, nil
 }
 
 func (tci *testCertIssuer) Pool() *x509.CertPool {
@@ -228,10 +247,7 @@ func startServer(t *testing.T, ctx context.Context, controlURL, hostname string)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	nodeFQDN := hostname + "." + status.CurrentTailnet.MagicDNSSuffix
-	certPEM, keyPEM, err := testCertRoot.makeCert(nodeFQDN)
-	s.lb.SetCertsForTest(ipnlocal.TLSCertKeyPair{CertPEM: certPEM, KeyPEM: keyPEM})
+	s.lb.ConfigureCertsForTest(testCertRoot.getCert)
 
 	return s, status.TailscaleIPs[0], status.Self.PublicKey
 }
@@ -808,15 +824,6 @@ func TestListenService(t *testing.T) {
 			serviceHostNode := control.Node(serviceHost.lb.NodeKey())
 			serviceHostNode.Tags = append(serviceHostNode.Tags, "some-tag")
 			control.UpdateNode(serviceHostNode)
-
-			// Configure a certificate for the Service domain (in production,
-			// the local backend would use an ACME client to obtain a certPEM).
-			// This is only used when serving over TLS.
-			certPEM, keyPEM := must.Get2(testCertRoot.makeCert(serviceFQDN))
-			serviceHost.lb.SetCertsForTest(ipnlocal.TLSCertKeyPair{
-				CertPEM: certPEM,
-				KeyPEM:  keyPEM,
-			})
 
 			// The service client must accept routes advertised by other nodes
 			// (RouteAll is equivalent to --accept-routes).

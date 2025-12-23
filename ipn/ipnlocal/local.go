@@ -400,9 +400,9 @@ type LocalBackend struct {
 	// bind the node identity to this device.
 	hardwareAttested atomic.Bool
 
-	// getCertForTest is used to configure TLS certificates for testing
-	// purposes. See [LocalBackend.SetCertsForTest].
-	getCertForTest func(domain string) (*TLSCertKeyPair, error)
+	// getCertForTest is used to retrieve TLS certificates in tests.
+	// See [LocalBackend.ConfigureCertsForTest].
+	getCertForTest func(hostname string) (*TLSCertKeyPair, error)
 }
 
 // SetHardwareAttested enables hardware attestation key signatures in map

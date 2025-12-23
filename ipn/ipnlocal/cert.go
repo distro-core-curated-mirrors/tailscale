@@ -45,7 +45,6 @@ import (
 	"tailscale.com/tailcfg"
 	"tailscale.com/tempfork/acme"
 	"tailscale.com/types/logger"
-	"tailscale.com/util/set"
 	"tailscale.com/util/testenv"
 	"tailscale.com/version"
 	"tailscale.com/version/distro"
@@ -309,38 +308,13 @@ func (b *LocalBackend) getCertStore() (certStore, error) {
 	return certFileStore{dir: dir, testRoots: testX509Roots}, nil
 }
 
-// SetCertsForTest configures the TLS certificates used by this local backend.
-// This should only be used in testing and can be used to skip the usual ACME
-// certificate registration.
-//
-// Certificates will be served based on the subject name or subject alternative
-// names (SANs) in the certificates. If this backend should serve certificates
-// for hostnames like foo.tail-scale.ts.net or test-service.tail-scale.ts.net,
-// then those names need to appear as a subject name or SAN.
-func (b *LocalBackend) SetCertsForTest(certs ...TLSCertKeyPair) {
+// ConfigureCertsForTest sets a certificate retrieval function to be used by
+// this local backend, skipping the usual ACME certificate registration. Should
+// only be used in tests.
+func (b *LocalBackend) ConfigureCertsForTest(getCert func(hostname string) (*TLSCertKeyPair, error)) {
 	testenv.AssertInTest()
-	m := map[string]TLSCertKeyPair{}
-	for _, c := range certs {
-		cert, err := tls.X509KeyPair(c.CertPEM, c.KeyPEM)
-		if err != nil {
-			panic(fmt.Sprintf("parse error: %v", err))
-		}
-		names := set.Of(append(cert.Leaf.DNSNames, cert.Leaf.Subject.CommonName)...)
-		for _, name := range names.Slice() {
-			if _, ok := m[name]; ok {
-				panic(fmt.Sprintf("duplicate subject name %v", name))
-			}
-			m[name] = c
-		}
-	}
 	b.mu.Lock()
-	b.getCertForTest = func(domain string) (*TLSCertKeyPair, error) {
-		c, ok := m[domain]
-		if !ok {
-			return nil, errors.New("cert not found")
-		}
-		return &c, nil
-	}
+	b.getCertForTest = getCert
 	b.mu.Unlock()
 }
 

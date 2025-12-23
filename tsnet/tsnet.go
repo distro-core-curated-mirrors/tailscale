@@ -1274,10 +1274,11 @@ func (s *Server) ListenService(name string, port uint16, opts ...ServiceOption) 
 	}
 
 	// TODO:
-	// - try above with simple TCP listener first
-	// - handle Services with multiple ports defined
-	// - support web handlers
-	// - make sure extras like PROXY mode are supported
+	// - create example for a Service with multiple ports
+	// - support web handlers?
+	//   - at least app capabilities need to work
+	//   - everything else could serve directly or use http.ReverseProxy, right?
+	//     - maybe worth an http.ReverseProxy example?
 	// - support TUN mode
 
 	// Process options.
