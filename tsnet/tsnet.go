@@ -159,8 +159,6 @@ type Server struct {
 	// that the control server will allow the node to adopt that tag.
 	AdvertiseTags []string
 
-	getCertForTesting func(*tls.ClientHelloInfo) (*tls.Certificate, error)
-
 	initOnce         sync.Once
 	initErr          error
 	lb               *ipnlocal.LocalBackend
@@ -1102,9 +1100,6 @@ func (s *Server) RegisterFallbackTCPHandler(cb FallbackTCPHandler) func() {
 // It calls GetCertificate on the localClient, passing in the ClientHelloInfo.
 // For testing, if s.getCertForTesting is set, it will call that instead.
 func (s *Server) getCert(hi *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	if s.getCertForTesting != nil {
-		return s.getCertForTesting(hi)
-	}
 	lc, err := s.LocalClient()
 	if err != nil {
 		return nil, err
