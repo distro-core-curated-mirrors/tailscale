@@ -758,16 +758,159 @@ func TestFunnel(t *testing.T) {
 }
 
 func TestListenService(t *testing.T) {
+	type dialFn func(context.Context, string, string) (net.Conn, error)
+
+	// TCP helpers
+	acceptAndEcho := func(t *testing.T, ln net.Listener) {
+		t.Helper()
+		conn, err := ln.Accept()
+		if err != nil {
+			t.Error("accept error:", err)
+			return
+		}
+		defer conn.Close()
+		if _, err := io.Copy(conn, conn); err != nil {
+			t.Error("copy error:", err)
+		}
+	}
+	assertEcho := func(t *testing.T, conn net.Conn) {
+		t.Helper()
+		msg := "echo"
+		buf := make([]byte, 1024)
+		if _, err := conn.Write([]byte(msg)); err != nil {
+			t.Fatal("write failed:", err)
+		}
+		n, err := conn.Read(buf)
+		if err != nil {
+			t.Fatal("read failed:", err)
+		}
+		got := string(buf[:n])
+		if got != msg {
+			t.Fatalf("unexpected response:\n\twant: %s\n\tgot: %s", msg, got)
+		}
+	}
+
+	// HTTP helpers
+	checkAndEcho := func(t *testing.T, ln net.Listener, check func(r *http.Request)) {
+		t.Helper()
+		http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer r.Body.Close()
+			check(r)
+			if _, err := io.Copy(w, r.Body); err != nil {
+				t.Error("copy error:", err)
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+		}))
+	}
+	assertEchoHTTP := func(t *testing.T, hostname string, dial dialFn) {
+		t.Helper()
+		c := http.Client{
+			Transport: &http.Transport{
+				DialContext: dial,
+			},
+		}
+		msg := "echo"
+		resp, err := c.Post("http://"+hostname, "text/plain", strings.NewReader(msg))
+		if err != nil {
+			t.Fatal("posting request:", err)
+		}
+		defer resp.Body.Close()
+		b, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal("reading body:", err)
+		}
+		got := string(b)
+		if got != msg {
+			t.Fatalf("unexpected response:\n\twant: %s\n\tgot: %s", msg, got)
+		}
+	}
+
 	tests := []struct {
 		name string
+		port uint16
 		opts []ServiceOption
+
+		extraSetup func(t *testing.T, serviceHost, peer *Server, control *testcontrol.Server)
+
+		// run the test. This function does not need to close any of the input
+		// resources, but it should close any new resources it opens.
+		run func(t *testing.T, serviceListener net.Listener, peer *Server, serviceFQDN string)
 	}{
 		{
-			name: "basic_TCP_service",
+			name: "basic_TCP",
+			port: 99,
+			run: func(t *testing.T, serviceListener net.Listener, peer *Server, serviceFQDN string) {
+				go acceptAndEcho(t, serviceListener)
+
+				target := fmt.Sprintf("%s:%d", serviceFQDN, 99)
+				conn := must.Get(peer.Dial(t.Context(), "tcp", target))
+				defer conn.Close()
+
+				assertEcho(t, conn)
+			},
 		},
 		{
 			name: "TLS_terminated_TCP",
 			opts: []ServiceOption{ServiceOptionTerminateTLS()},
+			port: 443,
+			run: func(t *testing.T, serviceListener net.Listener, peer *Server, serviceFQDN string) {
+				go acceptAndEcho(t, serviceListener)
+
+				target := fmt.Sprintf("%s:%d", serviceFQDN, 443)
+				conn := must.Get(peer.Dial(t.Context(), "tcp", target))
+				defer conn.Close()
+
+				assertEcho(t, tls.Client(conn, &tls.Config{
+					ServerName: serviceFQDN,
+					RootCAs:    testCertRoot.Pool(),
+				}))
+			},
+		},
+		{
+			name: "identity_headers",
+			opts: []ServiceOption{ServiceOptionWithHeaders()},
+			port: 80,
+			run: func(t *testing.T, serviceListener net.Listener, peer *Server, serviceFQDN string) {
+				expectHeader := "Tailscale-User-Name"
+				go checkAndEcho(t, serviceListener, func(r *http.Request) {
+					if _, ok := r.Header[expectHeader]; !ok {
+						t.Error("did not see expected header:", expectHeader)
+					}
+				})
+				assertEchoHTTP(t, serviceFQDN, peer.Dial)
+			},
+		},
+		{
+			name: "app_capabilities",
+			opts: []ServiceOption{ServiceOptionAppCapabilities("example.com/cap/want")},
+			port: 80,
+			extraSetup: func(t *testing.T, serviceHost, peer *Server, control *testcontrol.Server) {
+				control.SetGlobalAppCaps(tailcfg.PeerCapMap{
+					"example.com/cap/want": []tailcfg.RawMessage{`true`},
+				})
+			},
+			run: func(t *testing.T, serviceListener net.Listener, peer *Server, serviceFQDN string) {
+				go checkAndEcho(t, serviceListener, func(r *http.Request) {
+					rawCaps, ok := r.Header["Tailscale-App-Capabilities"]
+					if !ok {
+						t.Error("no app capabilities header")
+						return
+					}
+					if len(rawCaps) != 1 {
+						t.Error("expected one app capabilities header value, got", len(rawCaps))
+						return
+					}
+					var caps map[string][]any
+					if err := json.Unmarshal([]byte(rawCaps[0]), &caps); err != nil {
+						t.Error("error unmarshaling app caps:", err)
+						return
+					}
+					if _, ok := caps["example.com/cap/want"]; !ok {
+						t.Errorf("got app caps, but expected cap is not present; saw:\n%v", caps)
+					}
+				})
+				assertEchoHTTP(t, serviceFQDN, peer.Dial)
+			},
 		},
 		// TODO:
 		// Success cases:
@@ -799,7 +942,6 @@ func TestListenService(t *testing.T) {
 			serviceClient, _, _ := startServer(t, ctx, controlURL, "service-client")
 
 			const serviceName = tailcfg.ServiceName("svc:foo")
-			const servicePort uint16 = 99
 			const serviceVIP = "100.11.22.33"
 
 			serviceFQDN := serviceName.WithoutPrefix() + "." + control.MagicDNSDomain
@@ -834,6 +976,16 @@ func TestListenService(t *testing.T) {
 				},
 			}))
 
+			// Set up DNS for our Service.
+			control.DNSConfig.ExtraRecords = append(control.DNSConfig.ExtraRecords, tailcfg.DNSRecord{
+				Name:  serviceFQDN,
+				Value: serviceVIP,
+			})
+
+			if tt.extraSetup != nil {
+				tt.extraSetup(t, serviceHost, serviceClient, control)
+			}
+
 			// Force netmap updates to avoid race conditions. The nodes need to
 			// see our control updates before we can start the test.
 			serviceClient.lb.DebugForceNetmapUpdate()
@@ -842,48 +994,10 @@ func TestListenService(t *testing.T) {
 			// == Done setting up mock state ==
 
 			// Start a Service listener.
-			ln := must.Get(serviceHost.ListenService(serviceName.String(), servicePort, tt.opts...))
+			ln := must.Get(serviceHost.ListenService(serviceName.String(), tt.port, tt.opts...))
 			defer ln.Close()
 
-			// Accept the first connection on ln and echo back what we receive.
-			go func() {
-				conn, err := ln.Accept()
-				if err != nil {
-					t.Error("accept error:", err)
-					return
-				}
-				defer conn.Close()
-				if _, err := io.Copy(conn, conn); err != nil {
-					t.Error("copy error:", err)
-				}
-			}()
-
-			target := fmt.Sprintf("%s:%d", serviceVIP, servicePort)
-			conn := must.Get(serviceClient.Dial(ctx, "tcp", target))
-			defer conn.Close()
-
-			for _, opt := range tt.opts {
-				if _, ok := opt.(serviceOptionTerminateTLS); ok {
-					conn = tls.Client(conn, &tls.Config{
-						ServerName: serviceFQDN,
-						RootCAs:    testCertRoot.Pool(),
-					})
-				}
-			}
-
-			msg := "hello, Service"
-			buf := make([]byte, 1024)
-			if _, err := conn.Write([]byte(msg)); err != nil {
-				t.Fatal("write failed:", err)
-			}
-			n, err := conn.Read(buf)
-			if err != nil {
-				t.Fatal("read failed:", err)
-			}
-			got := string(buf[:n])
-			if got != msg {
-				t.Fatalf("unexpected response:\n\twant: %s\n\tgot: %s", msg, got)
-			}
+			tt.run(t, ln, serviceClient, serviceFQDN)
 		})
 	}
 }

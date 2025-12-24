@@ -1260,6 +1260,32 @@ func ServiceOptionPROXYProtocol(version int) ServiceOption {
 	return serviceOptionPROXYProtocol{version}
 }
 
+type serviceOptionAppCapabilities struct {
+	path string
+	caps []string
+}
+
+func (serviceOptionAppCapabilities) serviceOption() {}
+
+// TODO: doc
+func ServiceOptionAppCapabilities(capabilities ...string) ServiceOption {
+	return ServiceOptionAppCapabilitiesForPath("/", capabilities...)
+}
+
+// TODO: doc
+func ServiceOptionAppCapabilitiesForPath(path string, capabilities ...string) ServiceOption {
+	return serviceOptionAppCapabilities{path, capabilities}
+}
+
+type serviceOptionWithHeaders struct{}
+
+func (serviceOptionWithHeaders) serviceOption() {}
+
+// TODO: doc
+func ServiceOptionWithHeaders() ServiceOption {
+	return serviceOptionWithHeaders{}
+}
+
 // ErrUntaggedServiceHost is returned by ListenService when run on a node
 // without any ACL tags. A node must use a tag-based identity to act as a
 // Service host. For more information, see:
@@ -1272,6 +1298,7 @@ func (s *Server) ListenService(name string, port uint16, opts ...ServiceOption) 
 	if err := tailcfg.ServiceName(name).Validate(); err != nil {
 		return nil, err
 	}
+	svcName := name
 
 	// TODO:
 	// - create example for a Service with multiple ports
@@ -1284,12 +1311,23 @@ func (s *Server) ListenService(name string, port uint16, opts ...ServiceOption) 
 	// Process options.
 	terminateTLS := false
 	proxyProtocol := 0
+	capsMap := map[string][]tailcfg.PeerCapability{} // mount point => caps
+	isHTTP := false
 	for _, o := range opts {
 		switch opt := o.(type) {
 		case serviceOptionTerminateTLS:
 			terminateTLS = true
 		case serviceOptionPROXYProtocol:
 			proxyProtocol = opt.version
+		case serviceOptionWithHeaders:
+			isHTTP = true
+		case serviceOptionAppCapabilities:
+			isHTTP = true
+			caps := make([]tailcfg.PeerCapability, 0, len(opt.caps))
+			for _, c := range opt.caps {
+				caps = append(caps, tailcfg.PeerCapability(c))
+			}
+			capsMap[opt.path] = append(capsMap[opt.path], caps...)
 		default:
 			return nil, fmt.Errorf("unknown opts FunnelOption type %T", o)
 		}
@@ -1315,12 +1353,12 @@ func (s *Server) ListenService(name string, port uint16, opts ...ServiceOption) 
 	if err != nil {
 		return nil, fmt.Errorf("fetching node preferences: %w", err)
 	}
-	if !slices.Contains(prefs.AdvertiseServices, name) {
+	if !slices.Contains(prefs.AdvertiseServices, svcName) {
 		// TODO: do we need to undo this edit on error?
 		_, err = lc.EditPrefs(ctx, &ipn.MaskedPrefs{
 			AdvertiseServicesSet: true,
 			Prefs: ipn.Prefs{
-				AdvertiseServices: append(prefs.AdvertiseServices, name),
+				AdvertiseServices: append(prefs.AdvertiseServices, svcName),
 			},
 		})
 		if err != nil {
@@ -1341,10 +1379,33 @@ func (s *Server) ListenService(name string, port uint16, opts ...ServiceOption) 
 	if err != nil {
 		return nil, fmt.Errorf("starting local listener: %w", err)
 	}
-	// Forward all connections from service-hostname:port to our socket.
-	srvConfig.SetTCPForwardingForService( // TODO: tangent, but can we reduce the number of args here?
-		port, ln.Addr().String(), tailcfg.ServiceName(name),
-		terminateTLS, proxyProtocol, st.CurrentTailnet.MagicDNSSuffix)
+
+	if isHTTP {
+		useTLS := false // TODO: set correctly
+		mds := st.CurrentTailnet.MagicDNSSuffix
+		setHandler := func(h ipn.HTTPHandler, path string) {
+			// TODO: do we need to add the path to the end of the proxy value?
+			h.Proxy = ln.Addr().String()
+			srvConfig.SetWebHandler(&h, svcName, port, path, useTLS, mds)
+		}
+		// Set a web handler for every mount point in the caps map. If we don't
+		// end up with a root handler after that, we need to set one.
+		haveRootHandler := false
+		for path, caps := range capsMap {
+			if path == "/" {
+				haveRootHandler = true
+			}
+			setHandler(ipn.HTTPHandler{AcceptAppCaps: caps}, path)
+		}
+		if !haveRootHandler {
+			setHandler(ipn.HTTPHandler{}, "/")
+		}
+	} else {
+		// Forward all connections from service-hostname:port to our socket.
+		srvConfig.SetTCPForwardingForService(
+			port, ln.Addr().String(), tailcfg.ServiceName(svcName),
+			terminateTLS, proxyProtocol, st.CurrentTailnet.MagicDNSSuffix)
+	}
 
 	if err := lc.SetServeConfig(ctx, srvConfig); err != nil {
 		ln.Close()
